@@ -35,6 +35,10 @@ class LibraryRepository(
     fun episodesFor(podcastUuid: String): Flow<List<EpisodeEntity>> =
         episodeDao.observeByPodcast(podcastUuid)
 
+    suspend fun episode(uuid: String): EpisodeEntity? = episodeDao.get(uuid)
+
+    suspend fun podcastTitle(uuid: String): String = podcastDao.get(uuid)?.title ?: ""
+
     private val _refreshState = MutableStateFlow<RefreshState>(RefreshState.Idle)
     val refreshState: StateFlow<RefreshState> = _refreshState.asStateFlow()
 

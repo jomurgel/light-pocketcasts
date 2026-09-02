@@ -33,6 +33,11 @@ class PocketCastsSyncApi(
     internal suspend fun inProgress(): InProgressResponseDto =
         authorizedPost("$apiBase/user/in_progress", EmptyRequestDto())
 
+    /** Push one episode's position/status. Response body is empty. */
+    internal suspend fun pushEpisodeProgress(update: EpisodeSyncRequestDto) {
+        authorizedPostNoContent("$apiBase/sync/update_episode", update)
+    }
+
     internal suspend fun podcastCatalog(podcastUuid: String): CachePodcastResponseDto {
         val response = guard { client.get("$cacheBase/mobile/podcast/full/$podcastUuid") }
         if (!response.status.isSuccess()) {
@@ -54,6 +59,28 @@ class PocketCastsSyncApi(
             }
             when {
                 response.status.isSuccess() -> return response.parse()
+                response.status == HttpStatusCode.Unauthorized && attempt == 0 -> {
+                    attempt++
+                    bearer = refreshBearer(bearer)
+                }
+                else -> throw SyncException.Server(response.status.value)
+            }
+        }
+    }
+
+    private suspend inline fun <reified B : Any> authorizedPostNoContent(url: String, requestBody: B) {
+        var bearer = session.bearer() ?: throw SyncException.SignedOut
+        var attempt = 0
+        while (true) {
+            val response = guard {
+                client.post(url) {
+                    header(HttpHeaders.Authorization, "Bearer $bearer")
+                    contentType(ContentType.Application.Json)
+                    setBody(requestBody)
+                }
+            }
+            when {
+                response.status.isSuccess() -> return
                 response.status == HttpStatusCode.Unauthorized && attempt == 0 -> {
                     attempt++
                     bearer = refreshBearer(bearer)

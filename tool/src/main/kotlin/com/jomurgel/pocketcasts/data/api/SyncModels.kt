@@ -60,3 +60,14 @@ internal data class CacheEpisodeDto(
     @SerialName("duration") val duration: Double? = null,
     @SerialName("published") val published: String? = null,
 )
+
+// --- progress push (/sync/update_episode) ---
+
+@Serializable
+internal data class EpisodeSyncRequestDto(
+    @SerialName("uuid") val uuid: String,
+    @SerialName("podcast") val podcast: String,
+    @SerialName("position") val position: Long,
+    @SerialName("duration") val duration: Long,
+    @SerialName("status") val status: Int,
+)

@@ -79,6 +79,17 @@ class FakeEpisodeDao : EpisodeDao {
             )
     }
 
+    override suspend fun updateLocalProgress(uuid: String, positionSec: Long, playStatus: Int, updatedAt: Long) {
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (
+            uuid to existing.copy(
+                positionSec = positionSec,
+                playStatus = playStatus,
+                positionUpdatedAt = updatedAt,
+            )
+            )
+    }
+
     override suspend fun downloadedFilePaths(podcastUuid: String): List<String> =
         store.value.values.filter { it.podcastUuid == podcastUuid }.mapNotNull { it.filePath }
 }

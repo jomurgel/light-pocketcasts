@@ -78,6 +78,26 @@ interface EpisodeDao {
 
     @Query("SELECT file_path FROM episodes WHERE podcast_uuid = :podcastUuid AND file_path IS NOT NULL")
     suspend fun downloadedFilePaths(podcastUuid: String): List<String>
+
+    @Query(
+        "UPDATE episodes SET position_sec = :positionSec, play_status = :playStatus, " +
+            "position_updated_at = :updatedAt WHERE uuid = :uuid",
+    )
+    suspend fun updateLocalProgress(uuid: String, positionSec: Long, playStatus: Int, updatedAt: Long)
+}
+
+@Dao
+interface PendingProgressDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: PendingProgressEntity)
+
+    @Query("SELECT * FROM pending_progress ORDER BY queued_at ASC")
+    suspend fun all(): List<PendingProgressEntity>
+
+    /** Delete only if the row hasn't been replaced by a newer update since. */
+    @Query("DELETE FROM pending_progress WHERE episode_uuid = :episodeUuid AND queued_at = :queuedAt")
+    suspend fun delete(episodeUuid: String, queuedAt: Long)
 }
 
 @Dao

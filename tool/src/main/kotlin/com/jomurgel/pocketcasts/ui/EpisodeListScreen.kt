@@ -29,6 +29,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -88,7 +89,11 @@ class EpisodeListScreen(
                 } else {
                     LazyColumn {
                         items(episodes, key = { it.uuid }) { episode ->
-                            EpisodeRow(episode)
+                            EpisodeRow(episode) {
+                                navigateTo(
+                                    screenFactory = { PlayerScreen(it, episode.uuid) },
+                                )
+                            }
                         }
                     }
                 }
@@ -98,10 +103,11 @@ class EpisodeListScreen(
 }
 
 @Composable
-fun EpisodeRow(episode: EpisodeEntity) {
+fun EpisodeRow(episode: EpisodeEntity, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .lightClickable(onClick = onClick)
             .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
     ) {
         LightText(

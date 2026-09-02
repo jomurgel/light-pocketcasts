@@ -18,6 +18,7 @@ import com.jomurgel.pocketcasts.data.AuthState
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.RefreshState
 import com.jomurgel.pocketcasts.data.db.PodcastEntity
+import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -40,10 +41,12 @@ import kotlinx.coroutines.launch
 class HomeViewModel(
     private val authRepository: AuthRepository,
     private val libraryRepository: LibraryRepository,
+    playbackController: PlaybackController,
 ) : LightViewModel<Unit>() {
 
     val authState = authRepository.authState
     val refreshState = libraryRepository.refreshState
+    val nowPlaying = playbackController.nowPlaying
 
     val podcasts: StateFlow<List<PodcastEntity>> = libraryRepository.podcasts
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -84,6 +87,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
     override fun createViewModel() = HomeViewModel(
         AppGraph.authRepository(lightContext),
         AppGraph.libraryRepository(lightContext),
+        AppGraph.playbackController(lightContext),
     )
 
     @Composable
@@ -92,6 +96,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         val authState by viewModel.authState.collectAsState()
         val refreshState by viewModel.refreshState.collectAsState()
         val podcasts by viewModel.podcasts.collectAsState()
+        val nowPlaying by viewModel.nowPlaying.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -100,7 +105,14 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                     .background(LightThemeTokens.colors.background),
             ) {
                 LightTopBar(
-                    leftButton = null,
+                    leftButton = if (nowPlaying != null) {
+                        LightBarButton.Text(
+                            text = "PLAYING",
+                            onClick = { navigateTo(screenFactory = { PlayerScreen(it) }) },
+                        )
+                    } else {
+                        null
+                    },
                     center = LightTopBarCenter.Text("Pocket Casts"),
                     rightButton = if (authState is AuthState.SignedIn) {
                         LightBarButton.Text(

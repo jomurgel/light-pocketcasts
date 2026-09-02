@@ -16,5 +16,6 @@ import androidx.room.RoomDatabase
 abstract class PocketCastsDatabase : RoomDatabase() {
     abstract fun podcastDao(): PodcastDao
     abstract fun episodeDao(): EpisodeDao
+    abstract fun pendingProgressDao(): PendingProgressDao
     abstract fun syncMetaDao(): SyncMetaDao
 }
