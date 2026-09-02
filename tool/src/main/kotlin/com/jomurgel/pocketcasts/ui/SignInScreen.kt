@@ -138,7 +138,7 @@ class SignInScreen(sealedActivity: SealedLightActivity) :
                     onClick = {
                         navigateTo(
                             screenFactory = {
-                                TextEditScreen(it, EditRequest("Password", state.password))
+                                PasswordEditScreen(it, "Password", state.password)
                             },
                             resultCallback = { value -> viewModel.setPassword(value) },
                         )

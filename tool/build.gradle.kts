@@ -75,6 +75,8 @@ kotlin {
 
 dependencies {
     implementation(project(":sdk:client"))
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.light.keyboard)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.ktor.client.mock)
     testImplementation(libs.kotlinx.coroutines.test)
