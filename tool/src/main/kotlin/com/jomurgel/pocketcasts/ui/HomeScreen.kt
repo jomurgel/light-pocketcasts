@@ -17,7 +17,6 @@ import com.jomurgel.pocketcasts.data.AuthRepository
 import com.jomurgel.pocketcasts.data.AuthState
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.RefreshState
-import com.jomurgel.pocketcasts.data.db.EpisodeEntity
 import com.jomurgel.pocketcasts.data.db.PodcastEntity
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
@@ -47,9 +46,6 @@ class HomeViewModel(
     val refreshState = libraryRepository.refreshState
 
     val podcasts: StateFlow<List<PodcastEntity>> = libraryRepository.podcasts
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-
-    val inProgress: StateFlow<List<EpisodeEntity>> = libraryRepository.inProgress
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private var refreshedThisSession = false
@@ -96,7 +92,6 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         val authState by viewModel.authState.collectAsState()
         val refreshState by viewModel.refreshState.collectAsState()
         val podcasts by viewModel.podcasts.collectAsState()
-        val inProgress by viewModel.inProgress.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -125,7 +120,6 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
 
                     is AuthState.SignedIn -> SignedInContent(
                         podcasts = podcasts,
-                        inProgress = inProgress,
                         refreshState = refreshState,
                     )
                 }
@@ -154,7 +148,6 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
     @Composable
     private fun SignedInContent(
         podcasts: List<PodcastEntity>,
-        inProgress: List<EpisodeEntity>,
         refreshState: RefreshState,
     ) {
         if (refreshState is RefreshState.Failed) {
@@ -176,13 +169,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         }
 
         LazyColumn {
-            if (inProgress.isNotEmpty()) {
-                item { SectionHeader("IN PROGRESS") }
-                items(inProgress, key = { "progress-${it.uuid}" }) { episode ->
-                    EpisodeRow(episode)
-                }
-            }
-
+            // Home is podcasts only; a Now Playing surface (current episode +
+            // queue) arrives with the player and navigates from the top bar.
             item { SectionHeader("PODCASTS") }
             if (podcasts.isEmpty()) {
                 item {
