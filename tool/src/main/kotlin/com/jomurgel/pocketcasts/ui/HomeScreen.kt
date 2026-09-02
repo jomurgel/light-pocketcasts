@@ -18,6 +18,7 @@ import com.jomurgel.pocketcasts.data.AuthState
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.RefreshState
 import com.jomurgel.pocketcasts.data.db.PodcastEntity
+import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
@@ -35,6 +36,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -42,11 +44,17 @@ class HomeViewModel(
     private val authRepository: AuthRepository,
     private val libraryRepository: LibraryRepository,
     playbackController: PlaybackController,
+    private val upNextQueue: UpNextQueue,
 ) : LightViewModel<Unit>() {
 
     val authState = authRepository.authState
     val refreshState = libraryRepository.refreshState
-    val nowPlaying = playbackController.nowPlaying
+
+    /** Live session here, or a synced queue head from another device. */
+    val showPlaying: StateFlow<Boolean> =
+        combine(playbackController.nowPlaying, upNextQueue.queue) { nowPlaying, queue ->
+            nowPlaying != null || queue.isNotEmpty()
+        }.stateIn(viewModelScope, SharingStarted.Lazily, false)
 
     val podcasts: StateFlow<List<PodcastEntity>> = libraryRepository.podcasts
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -59,6 +67,10 @@ class HomeViewModel(
             authRepository.authState.collect { state ->
                 if (state is AuthState.SignedIn && !refreshedThisSession) {
                     refreshedThisSession = true
+                    // Queue sync first: it's one cheap call and drives the
+                    // PLAYING affordance; the full library refresh can take
+                    // a while on a large account.
+                    launch { upNextQueue.sync() }
                     libraryRepository.refresh()
                 }
             }
@@ -88,6 +100,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         AppGraph.authRepository(lightContext),
         AppGraph.libraryRepository(lightContext),
         AppGraph.playbackController(lightContext),
+        AppGraph.upNextQueue(lightContext),
     )
 
     @Composable
@@ -96,7 +109,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         val authState by viewModel.authState.collectAsState()
         val refreshState by viewModel.refreshState.collectAsState()
         val podcasts by viewModel.podcasts.collectAsState()
-        val nowPlaying by viewModel.nowPlaying.collectAsState()
+        val showPlaying by viewModel.showPlaying.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -105,7 +118,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                     .background(LightThemeTokens.colors.background),
             ) {
                 LightTopBar(
-                    leftButton = if (nowPlaying != null) {
+                    leftButton = if (showPlaying) {
                         LightBarButton.Text(
                             text = "PLAYING",
                             onClick = { navigateTo(screenFactory = { PlayerScreen(it) }) },

@@ -9,6 +9,7 @@ import com.jomurgel.pocketcasts.data.api.PocketCastsSyncApi
 import com.jomurgel.pocketcasts.data.api.pocketCastsHttpClient
 import com.jomurgel.pocketcasts.data.db.PocketCastsDatabase
 import com.jomurgel.pocketcasts.data.ProgressRepository
+import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.data.sync.PocketCastsSyncBackend
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.thelightphone.sdk.LightWork
@@ -38,6 +39,9 @@ object AppGraph {
     @Volatile
     private var playback: PlaybackController? = null
 
+    @Volatile
+    private var upNext: UpNextQueue? = null
+
     fun authRepository(context: SealedLightContext): AuthRepository {
         return auth ?: synchronized(this) {
             auth ?: buildAuth(context).also { auth = it }
@@ -56,11 +60,26 @@ object AppGraph {
         }
     }
 
+    fun upNextQueue(context: SealedLightContext): UpNextQueue {
+        return upNext ?: synchronized(this) {
+            upNext ?: buildUpNext(context).also { upNext = it }
+        }
+    }
+
+    private fun buildUpNext(context: SealedLightContext): UpNextQueue {
+        val authRepository = authRepository(context)
+        val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
+        return UpNextQueue(db(context).syncMetaDao(), PocketCastsSyncBackend(syncApi))
+    }
+
     fun playbackController(context: SealedLightContext): PlaybackController {
         return playback ?: synchronized(this) {
             playback ?: PlaybackController(
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
                 progressRepository = progressRepository(context),
+                upNextQueue = upNextQueue(context),
+                episodeLookup = { uuid -> db(context).episodeDao().get(uuid) },
+                podcastTitleLookup = { uuid -> db(context).podcastDao().get(uuid)?.title ?: "" },
             ).also { playback = it }
         }
     }

@@ -9,7 +9,44 @@ interface SyncBackend {
     suspend fun fetchSubscriptions(): List<RemotePodcast>
     suspend fun fetchEpisodes(podcastUuid: String): List<RemoteEpisode>
     suspend fun fetchInProgress(): List<RemoteEpisodeState>
+
+    /**
+     * Two-way queue sync: send the last-seen watermark plus local changes,
+     * receive the authoritative queue when it differs from [serverModified].
+     */
+    suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult
 }
+
+/** Queue actions, matching Pocket Casts change-log values. */
+object QueueAction {
+    const val PLAY_NOW = 1
+    const val PLAY_NEXT = 2
+    const val PLAY_LAST = 3
+    const val REMOVE = 4
+}
+
+data class RemoteQueueChange(
+    val action: Int,
+    val modifiedAtMs: Long,
+    val episodeUuid: String?,
+    val title: String? = null,
+    val audioUrl: String? = null,
+    val podcastUuid: String? = null,
+    val publishedIso: String? = null,
+)
+
+data class RemoteQueueEpisode(
+    val uuid: String,
+    val title: String,
+    val audioUrl: String,
+    val podcastUuid: String,
+)
+
+data class RemoteQueueResult(
+    val serverModified: Long,
+    /** Null when the server queue matches the sent watermark. */
+    val episodes: List<RemoteQueueEpisode>?,
+)
 
 data class RemotePodcast(
     val uuid: String,

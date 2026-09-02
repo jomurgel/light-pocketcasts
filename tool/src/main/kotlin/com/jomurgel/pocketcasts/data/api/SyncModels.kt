@@ -71,3 +71,44 @@ internal data class EpisodeSyncRequestDto(
     @SerialName("duration") val duration: Long,
     @SerialName("status") val status: Int,
 )
+
+// --- up next sync (/up_next/sync) ---
+
+@Serializable
+internal data class UpNextSyncRequestDto(
+    @SerialName("deviceTime") val deviceTime: Long,
+    @SerialName("version") val version: String = "2",
+    @SerialName("upNext") val upNext: UpNextBodyDto,
+)
+
+@Serializable
+internal data class UpNextBodyDto(
+    @SerialName("serverModified") val serverModified: Long,
+    @SerialName("changes") val changes: List<UpNextChangeDto>,
+)
+
+@Serializable
+internal data class UpNextChangeDto(
+    @SerialName("action") val action: Int,
+    @SerialName("modified") val modified: Long,
+    @SerialName("uuid") val uuid: String? = null,
+    @SerialName("title") val title: String? = null,
+    @SerialName("url") val url: String? = null,
+    @SerialName("published") val published: String? = null,
+    @SerialName("podcast") val podcast: String? = null,
+)
+
+@Serializable
+internal data class UpNextSyncResponseDto(
+    @SerialName("serverModified") val serverModified: Long = 0,
+    @SerialName("episodes") val episodes: List<QueueEpisodeDto>? = null,
+)
+
+@Serializable
+internal data class QueueEpisodeDto(
+    @SerialName("uuid") val uuid: String,
+    @SerialName("title") val title: String? = null,
+    @SerialName("url") val url: String? = null,
+    @SerialName("podcast") val podcast: String? = null,
+    @SerialName("published") val published: String? = null,
+)

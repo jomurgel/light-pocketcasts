@@ -33,6 +33,9 @@ class PocketCastsSyncApi(
     internal suspend fun inProgress(): InProgressResponseDto =
         authorizedPost("$apiBase/user/in_progress", EmptyRequestDto())
 
+    internal suspend fun upNextSync(request: UpNextSyncRequestDto): UpNextSyncResponseDto =
+        authorizedPost("$apiBase/up_next/sync", request)
+
     /** Push one episode's position/status. Response body is empty. */
     internal suspend fun pushEpisodeProgress(update: EpisodeSyncRequestDto) {
         authorizedPostNoContent("$apiBase/sync/update_episode", update)

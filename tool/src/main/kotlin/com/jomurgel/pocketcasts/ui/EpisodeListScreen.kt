@@ -91,7 +91,7 @@ class EpisodeListScreen(
                         items(episodes, key = { it.uuid }) { episode ->
                             EpisodeRow(episode) {
                                 navigateTo(
-                                    screenFactory = { PlayerScreen(it, episode.uuid) },
+                                    screenFactory = { EpisodeActionsScreen(it, episode.uuid) },
                                 )
                             }
                         }

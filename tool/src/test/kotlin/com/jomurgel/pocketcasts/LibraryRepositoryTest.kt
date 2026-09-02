@@ -8,6 +8,8 @@ import com.jomurgel.pocketcasts.data.db.PodcastEntity
 import com.jomurgel.pocketcasts.data.sync.RemoteEpisode
 import com.jomurgel.pocketcasts.data.sync.RemoteEpisodeState
 import com.jomurgel.pocketcasts.data.sync.RemotePodcast
+import com.jomurgel.pocketcasts.data.sync.RemoteQueueChange
+import com.jomurgel.pocketcasts.data.sync.RemoteQueueResult
 import com.jomurgel.pocketcasts.data.sync.SyncBackend
 import com.jomurgel.pocketcasts.data.sync.SyncException
 import java.io.File
@@ -37,6 +39,9 @@ private class FakeBackend(
     }
 
     override suspend fun fetchInProgress(): List<RemoteEpisodeState> = inProgress
+
+    override suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult =
+        RemoteQueueResult(serverModified, null)
 }
 
 private fun remoteEpisode(uuid: String, podcast: String, published: Long = 1000) =

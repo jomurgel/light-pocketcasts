@@ -1,7 +1,14 @@
 package com.jomurgel.pocketcasts
 
 import com.jomurgel.pocketcasts.data.ProgressRepository
+import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.data.db.EpisodeEntity
+import com.jomurgel.pocketcasts.data.sync.RemoteEpisode
+import com.jomurgel.pocketcasts.data.sync.RemoteEpisodeState
+import com.jomurgel.pocketcasts.data.sync.RemotePodcast
+import com.jomurgel.pocketcasts.data.sync.RemoteQueueChange
+import com.jomurgel.pocketcasts.data.sync.RemoteQueueResult
+import com.jomurgel.pocketcasts.data.sync.SyncBackend
 import com.jomurgel.pocketcasts.playback.PROGRESS_SAMPLE_INTERVAL_MS
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.jomurgel.pocketcasts.playback.PlayerHandle
@@ -61,10 +68,19 @@ private fun episode(positionSec: Long = 0, filePath: String? = null) = EpisodeEn
     positionSec = positionSec, filePath = filePath,
 )
 
+private class NoopQueueBackend : SyncBackend {
+    override suspend fun fetchSubscriptions(): List<RemotePodcast> = emptyList()
+    override suspend fun fetchEpisodes(podcastUuid: String): List<RemoteEpisode> = emptyList()
+    override suspend fun fetchInProgress(): List<RemoteEpisodeState> = emptyList()
+    override suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult =
+        RemoteQueueResult(serverModified + 1, null)
+}
+
 class PlaybackControllerTest {
 
     private val episodeDao = FakeEpisodeDao()
     private val pendingDao = FakePendingProgressDao()
+    private val queue = UpNextQueue(FakeSyncMetaDao(), NoopQueueBackend(), now = { 42L })
 
     private fun progressRepo() = ProgressRepository(
         episodeDao = episodeDao,
@@ -77,7 +93,10 @@ class PlaybackControllerTest {
     @Test
     fun `play resumes from saved position and records progress`() = runTest {
         val handle = FakePlayerHandle()
-        val controller = PlaybackController(this, progressRepo())
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
         episodeDao.insertIgnore(listOf(episode(positionSec = 0)))
 
         assertTrue(controller.attach { handle })
@@ -94,7 +113,10 @@ class PlaybackControllerTest {
     @Test
     fun `near-start positions do not seek`() = runTest {
         val handle = FakePlayerHandle()
-        val controller = PlaybackController(this, progressRepo())
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
         assertTrue(controller.attach { handle })
         controller.play(episode(positionSec = 3), "Show One")
         runCurrent()
@@ -105,7 +127,11 @@ class PlaybackControllerTest {
     @Test
     fun `downloaded episodes play from file`() = runTest {
         val handle = FakePlayerHandle()
-        val controller = PlaybackController(this, progressRepo())
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
+        episodeDao.insertIgnore(listOf(episode(filePath = "/data/episodes/e1.mp3")))
         assertTrue(controller.attach { handle })
         controller.play(episode(filePath = "/data/episodes/e1.mp3"), "Show One")
         runCurrent()
@@ -116,7 +142,10 @@ class PlaybackControllerTest {
     @Test
     fun `sampler records while playing and on pause`() = runTest {
         val handle = FakePlayerHandle()
-        val controller = PlaybackController(this, progressRepo())
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
         episodeDao.insertIgnore(listOf(episode()))
         assertTrue(controller.attach { handle })
         controller.play(episode(), "Show One")
@@ -137,7 +166,10 @@ class PlaybackControllerTest {
     @Test
     fun `attach fails cleanly when the player never readies`() = runTest {
         val handle = FakePlayerHandle().apply { ready = false }
-        val controller = PlaybackController(this, progressRepo())
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
         assertEquals(false, controller.attach { handle })
     }
 }

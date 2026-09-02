@@ -13,6 +13,9 @@ const val PUSH_PROGRESS_JOB_KEY = "push-progress"
  */
 @LightJob(PUSH_PROGRESS_JOB_KEY)
 val pushProgress: LightJobHandler = { ctx, _ ->
+    // Queue sync piggybacks on every progress push; failures self-heal on the
+    // next sync, so its result doesn't affect the job outcome.
+    AppGraph.upNextQueue(ctx).sync()
     when (AppGraph.progressRepository(ctx).drain()) {
         is ProgressRepository.DrainResult.Done -> LightJobResult.Success()
         is ProgressRepository.DrainResult.Retry -> LightJobResult.Retry

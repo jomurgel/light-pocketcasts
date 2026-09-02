@@ -15,6 +15,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.jomurgel.pocketcasts.AppGraph
 import com.jomurgel.pocketcasts.data.LibraryRepository
+import com.jomurgel.pocketcasts.data.QueueItem
+import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.playback.LightPlayerHandle
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.thelightphone.sdk.LightScreen
@@ -43,11 +45,13 @@ import kotlinx.coroutines.launch
 class PlayerViewModel(
     private val controller: PlaybackController,
     private val library: LibraryRepository,
+    private val upNextQueue: UpNextQueue,
     private val audio: LightAudio,
     private val startEpisodeUuid: String?,
 ) : LightViewModel<Unit>() {
 
     val nowPlaying = controller.nowPlaying
+    val queue = upNextQueue.queue
     val positionMs = controller.positionMs
     val durationMs = controller.durationMs
     val isPlaying = controller.isPlaying
@@ -80,6 +84,28 @@ class PlayerViewModel(
                 }
             }
         }
+        viewModelScope.launch { upNextQueue.sync() }
+    }
+
+    /** Start the synced queue head (e.g. an episode begun on the web). */
+    fun resumeQueueHead() {
+        viewModelScope.launch { controller.playFromQueue() }
+    }
+
+    fun removeFromQueue(episodeUuid: String) {
+        viewModelScope.launch {
+            upNextQueue.remove(episodeUuid)
+            controller.refreshQueueInPlayer()
+            upNextQueue.sync()
+        }
+    }
+
+    fun moveToTop(episodeUuid: String) {
+        viewModelScope.launch {
+            upNextQueue.moveToTop(episodeUuid)
+            controller.refreshQueueInPlayer()
+            upNextQueue.sync()
+        }
     }
 
     fun togglePlayPause() = controller.togglePlayPause()
@@ -101,6 +127,7 @@ class PlayerScreen(
     override fun createViewModel() = PlayerViewModel(
         controller = AppGraph.playbackController(lightContext),
         library = AppGraph.libraryRepository(lightContext),
+        upNextQueue = AppGraph.upNextQueue(lightContext),
         audio = DefaultLightAudio(sealed),
         startEpisodeUuid = startEpisodeUuid,
     )
@@ -115,6 +142,7 @@ class PlayerScreen(
         val speed by viewModel.speed.collectAsState()
         val playbackError by viewModel.playbackError.collectAsState()
         val attachError by viewModel.attachError.collectAsState()
+        val queue by viewModel.queue.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -138,25 +166,48 @@ class PlayerScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 1f.gridUnitsAsDp()),
                 ) {
-                    if (nowPlaying == null) {
-                        LightText(
+                    val head = queue.firstOrNull()
+                    when {
+                        nowPlaying != null -> {
+                            LightText(
+                                text = nowPlaying?.episodeTitle.orEmpty(),
+                                variant = LightTextVariant.Heading,
+                                maxLines = 3,
+                            )
+                            LightText(
+                                text = nowPlaying?.podcastTitle.orEmpty(),
+                                variant = LightTextVariant.Copy,
+                                lighten = true,
+                                modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
+                            )
+                        }
+                        head != null -> {
+                            // Synced current episode from another device, not
+                            // yet started here. Play resumes it.
+                            LightText(
+                                text = head.title,
+                                variant = LightTextVariant.Heading,
+                                maxLines = 3,
+                            )
+                            LightText(
+                                text = "Synced from your other devices. Press play to resume.",
+                                variant = LightTextVariant.Detail,
+                                lighten = true,
+                                modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
+                            )
+                        }
+                        else -> LightText(
                             text = "Nothing playing. Pick an episode from a podcast.",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                         )
-                    } else {
-                        LightText(
-                            text = nowPlaying?.episodeTitle.orEmpty(),
-                            variant = LightTextVariant.Heading,
-                            maxLines = 4,
-                        )
-                        LightText(
-                            text = nowPlaying?.podcastTitle.orEmpty(),
-                            variant = LightTextVariant.Copy,
-                            lighten = true,
-                            modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
-                        )
                     }
+
+                    UpNextSection(
+                        upcoming = queue.drop(1),
+                        onRemove = viewModel::removeFromQueue,
+                        onMoveToTop = viewModel::moveToTop,
+                    )
 
                     Spacer(modifier = Modifier.weight(1f))
 
@@ -197,7 +248,13 @@ class PlayerScreen(
                         ),
                         LightBarButton.LightIcon(
                             if (playing) LightIcons.PAUSE else LightIcons.PLAY,
-                            viewModel::togglePlayPause,
+                            onClick = {
+                                if (nowPlaying == null && queue.isNotEmpty()) {
+                                    viewModel.resumeQueueHead()
+                                } else {
+                                    viewModel.togglePlayPause()
+                                }
+                            },
                             contentDescription = if (playing) "Pause" else "Play",
                         ),
                         LightBarButton.LightIcon(
@@ -209,6 +266,53 @@ class PlayerScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun UpNextSection(
+    upcoming: List<QueueItem>,
+    onRemove: (String) -> Unit,
+    onMoveToTop: (String) -> Unit,
+) {
+    if (upcoming.isEmpty()) return
+    LightText(
+        text = "UP NEXT (${upcoming.size})",
+        variant = LightTextVariant.Detail,
+        lighten = true,
+        modifier = Modifier.padding(top = 1f.gridUnitsAsDp(), bottom = 0.25f.gridUnitsAsDp()),
+    )
+    upcoming.take(5).forEach { item ->
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 0.25f.gridUnitsAsDp())) {
+            LightText(
+                text = item.title,
+                variant = LightTextVariant.Copy,
+                maxLines = 1,
+            )
+            Row {
+                LightText(
+                    text = "TOP",
+                    variant = LightTextVariant.Fine,
+                    lighten = true,
+                    modifier = Modifier
+                        .lightClickable { onMoveToTop(item.episodeUuid) }
+                        .padding(end = 1f.gridUnitsAsDp()),
+                )
+                LightText(
+                    text = "REMOVE",
+                    variant = LightTextVariant.Fine,
+                    lighten = true,
+                    modifier = Modifier.lightClickable { onRemove(item.episodeUuid) },
+                )
+            }
+        }
+    }
+    if (upcoming.size > 5) {
+        LightText(
+            text = "+${upcoming.size - 5} more",
+            variant = LightTextVariant.Fine,
+            lighten = true,
+        )
     }
 }
 
