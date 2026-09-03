@@ -5,6 +5,8 @@ versionCode = 1
 versionName = "0.1.0"
 permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE"]
 capabilities = ["detached-audio"]
-orientation = "portrait"
+# orientation lock omitted on purpose: stock AOSP letterboxes fixed-orientation
+# apps to 4:3 on the LP3's squarish display (config_fixedOrientationLetterboxAspectRatio),
+# which clips the UI on the tier-2 emulator. The LP3 display is portrait-fixed anyway.
 # change if you run this on an LP3!
 serverPackage = "com.thelightphone.sdk.emulator"
