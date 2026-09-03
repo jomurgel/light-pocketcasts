@@ -142,14 +142,10 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                         null
                     },
                     center = LightTopBarCenter.Text("Pocket Casts"),
-                    rightButton = if (authState is AuthState.SignedIn) {
-                        LightBarButton.Text(
-                            text = if (refreshState is RefreshState.Refreshing) "SYNCING" else "SYNC",
-                            onClick = { viewModel.refresh() },
-                        )
-                    } else {
-                        null
-                    },
+                    rightButton = LightBarButton.Text(
+                        text = "SETTINGS",
+                        onClick = { navigateTo(screenFactory = { SettingsScreen(it) }) },
+                    ),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
@@ -230,18 +226,6 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                 }
             }
 
-            item {
-                LightText(
-                    text = "SETTINGS",
-                    variant = LightTextVariant.Heading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .lightClickable {
-                            navigateTo(screenFactory = { SettingsScreen(it) })
-                        }
-                        .padding(1f.gridUnitsAsDp()),
-                )
-            }
         }
     }
 }

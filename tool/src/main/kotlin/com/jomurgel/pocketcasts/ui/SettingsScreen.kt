@@ -14,6 +14,9 @@ import com.jomurgel.pocketcasts.AppGraph
 import com.jomurgel.pocketcasts.data.AuthRepository
 import com.jomurgel.pocketcasts.data.AuthState
 import com.jomurgel.pocketcasts.data.DownloadManager
+import com.jomurgel.pocketcasts.data.LibraryRepository
+import com.jomurgel.pocketcasts.data.RefreshState
+import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -36,9 +39,18 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val authRepository: AuthRepository,
     private val downloadManager: DownloadManager,
+    private val libraryRepository: LibraryRepository,
+    private val upNextQueue: UpNextQueue,
 ) : LightViewModel<Unit>() {
 
     val authState = authRepository.authState
+    val refreshState = libraryRepository.refreshState
+
+    /** Full account refresh, matching the official app's "Refresh Now". */
+    fun refreshNow() {
+        viewModelScope.launch { upNextQueue.sync() }
+        viewModelScope.launch { libraryRepository.refresh() }
+    }
 
     private val _storageBytes = MutableStateFlow(0L)
     val storageBytes = _storageBytes.asStateFlow()
@@ -73,6 +85,8 @@ class SettingsScreen(sealedActivity: SealedLightActivity) :
     override fun createViewModel() = SettingsViewModel(
         AppGraph.authRepository(lightContext),
         AppGraph.downloadManager(lightContext),
+        AppGraph.libraryRepository(lightContext),
+        AppGraph.upNextQueue(lightContext),
     )
 
     @Composable
@@ -80,6 +94,7 @@ class SettingsScreen(sealedActivity: SealedLightActivity) :
         val themeColors by LightThemeController.colors.collectAsState()
         val authState by viewModel.authState.collectAsState()
         val storageBytes by viewModel.storageBytes.collectAsState()
+        val refreshState by viewModel.refreshState.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -110,6 +125,19 @@ class SettingsScreen(sealedActivity: SealedLightActivity) :
                     modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
                 )
 
+                if (signedInAs != null) {
+                    SettingsAction(
+                        if (refreshState is RefreshState.Refreshing) "REFRESHING…" else "REFRESH NOW",
+                    ) { viewModel.refreshNow() }
+                    if (refreshState is RefreshState.Failed) {
+                        LightText(
+                            text = (refreshState as RefreshState.Failed).message,
+                            variant = LightTextVariant.Detail,
+                            lighten = true,
+                            modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
+                        )
+                    }
+                }
                 SettingsAction("CLEAR DOWNLOADS") { viewModel.clearDownloads() }
                 if (signedInAs != null) {
                     SettingsAction("SIGN OUT") {
