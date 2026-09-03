@@ -16,8 +16,30 @@ class FakePodcastDao : PodcastDao {
 
     override suspend fun get(uuid: String): PodcastEntity? = store.value[uuid]
 
-    override suspend fun upsertAll(podcasts: List<PodcastEntity>) {
-        store.value = store.value + podcasts.associateBy { it.uuid }
+    override suspend fun insertIgnore(podcasts: List<PodcastEntity>) {
+        val current = store.value.toMutableMap()
+        podcasts.forEach { current.putIfAbsent(it.uuid, it) }
+        store.value = current
+    }
+
+    override suspend fun updateCatalog(
+        uuid: String,
+        title: String,
+        author: String,
+        episodeCount: Int,
+        latestEpisodeAt: Long?,
+        updatedAt: Long,
+    ) {
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (
+            uuid to existing.copy(
+                title = title,
+                author = author,
+                episodeCount = episodeCount,
+                latestEpisodeAt = latestEpisodeAt,
+                updatedAt = updatedAt,
+            )
+            )
     }
 
     override suspend fun deleteNotIn(keepUuids: List<String>) {
@@ -92,4 +114,32 @@ class FakeEpisodeDao : EpisodeDao {
 
     override suspend fun downloadedFilePaths(podcastUuid: String): List<String> =
         store.value.values.filter { it.podcastUuid == podcastUuid }.mapNotNull { it.filePath }
+
+    override fun observe(uuid: String): Flow<EpisodeEntity?> = store.map { it[uuid] }
+
+    override suspend fun updateDownloadState(uuid: String, state: Int, progress: Int, filePath: String?) {
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (
+            uuid to existing.copy(downloadState = state, downloadProgress = progress, filePath = filePath)
+            )
+    }
+
+    override suspend fun resetInterruptedDownloads() {
+        store.value = store.value.mapValues { (_, episode) ->
+            if (episode.downloadState == com.jomurgel.pocketcasts.data.db.DownloadState.QUEUED ||
+                episode.downloadState == com.jomurgel.pocketcasts.data.db.DownloadState.DOWNLOADING
+            ) {
+                episode.copy(
+                    downloadState = com.jomurgel.pocketcasts.data.db.DownloadState.FAILED,
+                    downloadProgress = 0,
+                    filePath = null,
+                )
+            } else {
+                episode
+            }
+        }
+    }
+
+    override suspend fun downloadedEpisodes(): List<EpisodeEntity> =
+        store.value.values.filter { it.downloadState == com.jomurgel.pocketcasts.data.db.DownloadState.DONE }
 }

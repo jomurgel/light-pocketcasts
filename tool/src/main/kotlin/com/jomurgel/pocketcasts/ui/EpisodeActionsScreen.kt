@@ -11,8 +11,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
 import com.jomurgel.pocketcasts.AppGraph
+import com.jomurgel.pocketcasts.data.DownloadManager
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.UpNextQueue
+import com.jomurgel.pocketcasts.data.db.DownloadState
 import com.jomurgel.pocketcasts.data.db.EpisodeEntity
 import com.jomurgel.pocketcasts.data.toQueueItem
 import com.thelightphone.sdk.LightScreen
@@ -36,6 +38,7 @@ import kotlinx.coroutines.launch
 class EpisodeActionsViewModel(
     private val library: LibraryRepository,
     private val upNextQueue: UpNextQueue,
+    private val downloadManager: DownloadManager,
     private val episodeUuid: String,
 ) : LightViewModel<Unit>() {
 
@@ -46,7 +49,15 @@ class EpisodeActionsViewModel(
     val queued = _queued.asStateFlow()
 
     init {
-        viewModelScope.launch { _episode.value = library.episode(episodeUuid) }
+        viewModelScope.launch {
+            library.observeEpisode(episodeUuid).collect { _episode.value = it }
+        }
+    }
+
+    fun download() = downloadManager.enqueue(episodeUuid)
+
+    fun deleteDownload() {
+        viewModelScope.launch { downloadManager.delete(episodeUuid) }
     }
 
     fun playNext() = queueAction("Queued next") { upNextQueue.playNext(it) }
@@ -75,6 +86,7 @@ class EpisodeActionsScreen(
     override fun createViewModel() = EpisodeActionsViewModel(
         AppGraph.libraryRepository(lightContext),
         AppGraph.upNextQueue(lightContext),
+        AppGraph.downloadManager(lightContext),
         episodeUuid,
     )
 
@@ -137,6 +149,15 @@ class EpisodeActionsScreen(
                 }
                 ActionRow("PLAY NEXT") { viewModel.playNext() }
                 ActionRow("PLAY LAST") { viewModel.playLast() }
+
+                when (current.downloadState) {
+                    DownloadState.QUEUED -> ActionRow("QUEUED…") {}
+                    DownloadState.DOWNLOADING ->
+                        ActionRow("DOWNLOADING ${current.downloadProgress}%") {}
+                    DownloadState.DONE -> ActionRow("DELETE DOWNLOAD") { viewModel.deleteDownload() }
+                    DownloadState.FAILED -> ActionRow("RETRY DOWNLOAD") { viewModel.download() }
+                    else -> ActionRow("DOWNLOAD") { viewModel.download() }
+                }
             }
         }
     }

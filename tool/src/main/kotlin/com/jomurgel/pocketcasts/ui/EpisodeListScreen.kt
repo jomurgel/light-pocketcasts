@@ -131,7 +131,13 @@ internal fun episodeDetailLine(episode: EpisodeEntity): String {
         episode.positionSec > 0 -> " · at ${formatDuration(episode.positionSec)}"
         else -> ""
     }
-    return "$date · $duration$progress"
+    val downloaded = when (episode.downloadState) {
+        com.jomurgel.pocketcasts.data.db.DownloadState.DONE -> " · downloaded"
+        com.jomurgel.pocketcasts.data.db.DownloadState.DOWNLOADING -> " · downloading"
+        com.jomurgel.pocketcasts.data.db.DownloadState.QUEUED -> " · queued"
+        else -> ""
+    }
+    return "$date · $duration$progress$downloaded"
 }
 
 internal fun formatDuration(totalSec: Long): String {

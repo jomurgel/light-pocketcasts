@@ -37,6 +37,8 @@ class LibraryRepository(
 
     suspend fun episode(uuid: String): EpisodeEntity? = episodeDao.get(uuid)
 
+    fun observeEpisode(uuid: String): Flow<EpisodeEntity?> = episodeDao.observe(uuid)
+
     suspend fun podcastTitle(uuid: String): String = podcastDao.get(uuid)?.title ?: ""
 
     private val _refreshState = MutableStateFlow<RefreshState>(RefreshState.Idle)

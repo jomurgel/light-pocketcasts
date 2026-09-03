@@ -20,8 +20,34 @@ interface PodcastDao {
     @Query("SELECT * FROM podcasts WHERE uuid = :uuid")
     suspend fun get(uuid: String): PodcastEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(podcasts: List<PodcastEntity>)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(podcasts: List<PodcastEntity>)
+
+    @Query(
+        "UPDATE podcasts SET title = :title, author = :author, episode_count = :episodeCount, " +
+            "latest_episode_at = :latestEpisodeAt, updated_at = :updatedAt WHERE uuid = :uuid",
+    )
+    suspend fun updateCatalog(
+        uuid: String,
+        title: String,
+        author: String,
+        episodeCount: Int,
+        latestEpisodeAt: Long?,
+        updatedAt: Long,
+    )
+
+    /**
+     * NEVER use OnConflictStrategy.REPLACE here: Room implements it as
+     * delete+insert, which fires the episodes CASCADE and wipes positions and
+     * download paths on every refresh.
+     */
+    @Transaction
+    suspend fun upsertAll(podcasts: List<PodcastEntity>) {
+        insertIgnore(podcasts)
+        podcasts.forEach {
+            updateCatalog(it.uuid, it.title, it.author, it.episodeCount, it.latestEpisodeAt, it.updatedAt)
+        }
+    }
 
     @Query("DELETE FROM podcasts WHERE uuid NOT IN (:keepUuids)")
     suspend fun deleteNotIn(keepUuids: List<String>)
@@ -47,6 +73,9 @@ interface EpisodeDao {
 
     @Query("SELECT * FROM episodes WHERE uuid = :uuid")
     suspend fun get(uuid: String): EpisodeEntity?
+
+    @Query("SELECT * FROM episodes WHERE uuid = :uuid")
+    fun observe(uuid: String): Flow<EpisodeEntity?>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(episodes: List<EpisodeEntity>)
@@ -84,6 +113,22 @@ interface EpisodeDao {
             "position_updated_at = :updatedAt WHERE uuid = :uuid",
     )
     suspend fun updateLocalProgress(uuid: String, positionSec: Long, playStatus: Int, updatedAt: Long)
+
+    @Query(
+        "UPDATE episodes SET download_state = :state, download_progress = :progress, " +
+            "file_path = :filePath WHERE uuid = :uuid",
+    )
+    suspend fun updateDownloadState(uuid: String, state: Int, progress: Int, filePath: String?)
+
+    /** Queued/mid-flight downloads that died with the process become failed. */
+    @Query(
+        "UPDATE episodes SET download_state = ${DownloadState.FAILED}, download_progress = 0, " +
+            "file_path = NULL WHERE download_state IN (${DownloadState.QUEUED}, ${DownloadState.DOWNLOADING})",
+    )
+    suspend fun resetInterruptedDownloads()
+
+    @Query("SELECT * FROM episodes WHERE download_state = ${DownloadState.DONE}")
+    suspend fun downloadedEpisodes(): List<EpisodeEntity>
 }
 
 @Dao

@@ -8,6 +8,7 @@ import com.jomurgel.pocketcasts.data.api.PocketCastsAuthApi
 import com.jomurgel.pocketcasts.data.api.PocketCastsSyncApi
 import com.jomurgel.pocketcasts.data.api.pocketCastsHttpClient
 import com.jomurgel.pocketcasts.data.db.PocketCastsDatabase
+import com.jomurgel.pocketcasts.data.DownloadManager
 import com.jomurgel.pocketcasts.data.ProgressRepository
 import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.data.sync.PocketCastsSyncBackend
@@ -18,6 +19,7 @@ import com.thelightphone.sdk.buildDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import java.io.File
 
 /**
  * Tiny hand-rolled service locator. Screens call [authRepository] from
@@ -42,6 +44,9 @@ object AppGraph {
     @Volatile
     private var upNext: UpNextQueue? = null
 
+    @Volatile
+    private var downloads: DownloadManager? = null
+
     fun authRepository(context: SealedLightContext): AuthRepository {
         return auth ?: synchronized(this) {
             auth ?: buildAuth(context).also { auth = it }
@@ -63,6 +68,18 @@ object AppGraph {
     fun upNextQueue(context: SealedLightContext): UpNextQueue {
         return upNext ?: synchronized(this) {
             upNext ?: buildUpNext(context).also { upNext = it }
+        }
+    }
+
+    fun downloadManager(context: SealedLightContext): DownloadManager {
+        return downloads ?: synchronized(this) {
+            downloads ?: DownloadManager(
+                episodeDao = db(context).episodeDao(),
+                client = pocketCastsHttpClient(),
+                downloadsDir = File(context.filesDir, "episodes"),
+                isOnline = { context.connectivity.currentStatus.isConnected },
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            ).also { downloads = it }
         }
     }
 

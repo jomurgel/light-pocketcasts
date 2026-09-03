@@ -106,12 +106,17 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
     override val viewModelClass: Class<HomeViewModel>
         get() = HomeViewModel::class.java
 
-    override fun createViewModel() = HomeViewModel(
-        AppGraph.authRepository(lightContext),
-        AppGraph.libraryRepository(lightContext),
-        AppGraph.playbackController(lightContext),
-        AppGraph.upNextQueue(lightContext),
-    )
+    override fun createViewModel(): HomeViewModel {
+        // Touch the download manager at startup: its init recovers
+        // interrupted downloads and sweeps orphaned files.
+        AppGraph.downloadManager(lightContext)
+        return HomeViewModel(
+            AppGraph.authRepository(lightContext),
+            AppGraph.libraryRepository(lightContext),
+            AppGraph.playbackController(lightContext),
+            AppGraph.upNextQueue(lightContext),
+        )
+    }
 
     @Composable
     override fun Content() {
@@ -227,11 +232,13 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
 
             item {
                 LightText(
-                    text = "SIGN OUT",
+                    text = "SETTINGS",
                     variant = LightTextVariant.Heading,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .lightClickable { viewModel.signOut() }
+                        .lightClickable {
+                            navigateTo(screenFactory = { SettingsScreen(it) })
+                        }
                         .padding(1f.gridUnitsAsDp()),
                 )
             }
