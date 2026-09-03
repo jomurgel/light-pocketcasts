@@ -14,9 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.jomurgel.pocketcasts.AppGraph
+import com.jomurgel.pocketcasts.data.DownloadManager
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.QueueItem
 import com.jomurgel.pocketcasts.data.UpNextQueue
+import com.jomurgel.pocketcasts.data.db.DownloadState
+import com.jomurgel.pocketcasts.data.db.EpisodeEntity
 import com.jomurgel.pocketcasts.playback.LightPlayerHandle
 import com.jomurgel.pocketcasts.playback.NowPlaying
 import com.jomurgel.pocketcasts.playback.PlaybackController
@@ -39,20 +42,35 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class PlayerViewModel(
     private val controller: PlaybackController,
     private val library: LibraryRepository,
     private val upNextQueue: UpNextQueue,
+    private val downloadManager: DownloadManager,
     private val audio: LightAudio,
     private val startEpisodeUuid: String?,
 ) : LightViewModel<Unit>() {
 
     val nowPlaying = controller.nowPlaying
     val isPreparing = controller.isPreparing
+
+    /** The current episode's live row — drives the download action state. */
+    val currentEpisode: StateFlow<EpisodeEntity?> = controller.nowPlaying
+        .flatMapLatest { playing ->
+            if (playing == null) flowOf(null) else library.observeEpisode(playing.episodeUuid)
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, null)
     val queue = upNextQueue.queue
     val positionMs = controller.positionMs
     val durationMs = controller.durationMs
@@ -87,7 +105,26 @@ class PlayerViewModel(
             }
         }
         viewModelScope.launch { upNextQueue.sync() }
+        // Download-while-streaming: when the file lands for the episode we're
+        // streaming, hot-swap the player to it at the same position.
+        viewModelScope.launch {
+            currentEpisode.collect { episode ->
+                val playing = controller.nowPlaying.value ?: return@collect
+                if (episode?.uuid == playing.episodeUuid &&
+                    episode.filePath != null &&
+                    !playing.fromDownload
+                ) {
+                    controller.refreshQueueInPlayer()
+                }
+            }
+        }
     }
+
+    fun downloadCurrent() {
+        controller.nowPlaying.value?.let { downloadManager.enqueue(it.episodeUuid) }
+    }
+
+    fun downloadQueued(episodeUuid: String) = downloadManager.enqueue(episodeUuid)
 
     /** Start the synced queue head (e.g. an episode begun on the web). */
     fun resumeQueueHead() {
@@ -130,6 +167,7 @@ class PlayerScreen(
         controller = AppGraph.playbackController(lightContext),
         library = AppGraph.libraryRepository(lightContext),
         upNextQueue = AppGraph.upNextQueue(lightContext),
+        downloadManager = AppGraph.downloadManager(lightContext),
         audio = DefaultLightAudio(sealed),
         startEpisodeUuid = startEpisodeUuid,
     )
@@ -146,6 +184,7 @@ class PlayerScreen(
         val playbackError by viewModel.playbackError.collectAsState()
         val attachError by viewModel.attachError.collectAsState()
         val queue by viewModel.queue.collectAsState()
+        val currentEpisode by viewModel.currentEpisode.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -215,6 +254,7 @@ class PlayerScreen(
                         upcoming = queue.drop(1),
                         onRemove = viewModel::removeFromQueue,
                         onMoveToTop = viewModel::moveToTop,
+                        onDownload = viewModel::downloadQueued,
                     )
 
                     Spacer(modifier = Modifier.weight(1f))
@@ -229,13 +269,34 @@ class PlayerScreen(
                         )
                     }
 
-                    playbackStatusLine(nowPlaying, playing, preparing)?.let { status ->
-                        LightText(
-                            text = status,
-                            variant = LightTextVariant.Fine,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 0.25f.gridUnitsAsDp()),
-                        )
+                    if (nowPlaying != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 0.25f.gridUnitsAsDp()),
+                        ) {
+                            LightText(
+                                text = playbackStatusLine(nowPlaying, playing, preparing).orEmpty(),
+                                variant = LightTextVariant.Fine,
+                                lighten = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            when {
+                                currentEpisode?.downloadState == DownloadState.QUEUED ||
+                                    currentEpisode?.downloadState == DownloadState.DOWNLOADING ->
+                                    LightText(
+                                        text = "SAVING ${currentEpisode?.downloadProgress ?: 0}%",
+                                        variant = LightTextVariant.Fine,
+                                        lighten = true,
+                                    )
+                                currentEpisode != null && currentEpisode?.filePath == null ->
+                                    LightText(
+                                        text = "DOWNLOAD",
+                                        variant = LightTextVariant.Fine,
+                                        modifier = Modifier.lightClickable { viewModel.downloadCurrent() },
+                                    )
+                            }
+                        }
                     }
 
                     Row(modifier = Modifier.fillMaxWidth()) {
@@ -297,6 +358,7 @@ private fun UpNextSection(
     upcoming: List<QueueItem>,
     onRemove: (String) -> Unit,
     onMoveToTop: (String) -> Unit,
+    onDownload: (String) -> Unit,
 ) {
     if (upcoming.isEmpty()) return
     LightText(
@@ -315,7 +377,7 @@ private fun UpNextSection(
             Row {
                 LightText(
                     text = "TOP",
-                    variant = LightTextVariant.Fine,
+                    variant = LightTextVariant.Superfine,
                     lighten = true,
                     modifier = Modifier
                         .lightClickable { onMoveToTop(item.episodeUuid) }
@@ -323,9 +385,17 @@ private fun UpNextSection(
                 )
                 LightText(
                     text = "REMOVE",
-                    variant = LightTextVariant.Fine,
+                    variant = LightTextVariant.Superfine,
                     lighten = true,
-                    modifier = Modifier.lightClickable { onRemove(item.episodeUuid) },
+                    modifier = Modifier
+                        .lightClickable { onRemove(item.episodeUuid) }
+                        .padding(end = 1f.gridUnitsAsDp()),
+                )
+                LightText(
+                    text = "DOWNLOAD",
+                    variant = LightTextVariant.Superfine,
+                    lighten = true,
+                    modifier = Modifier.lightClickable { onDownload(item.episodeUuid) },
                 )
             }
         }

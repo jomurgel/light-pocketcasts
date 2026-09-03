@@ -192,6 +192,32 @@ class PlaybackControllerTest {
     }
 
     @Test
+    fun `refresh queue swaps to downloaded file preserving position`() = runTest {
+        val handle = FakePlayerHandle()
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
+        episodeDao.insertIgnore(listOf(episode()))
+        assertTrue(controller.attach { handle })
+        controller.play(episode(), "Show One")
+        runCurrent()
+        assertTrue(handle.queue.single().source is LightAudioSource.UrlSource)
+
+        // Download lands mid-stream.
+        episodeDao.updateDownloadState("e1", 3, 100, "/data/episodes/e1.mp3")
+        handle.positionMs.value = 30_000L
+        controller.refreshQueueInPlayer()
+        runCurrent()
+
+        assertTrue(handle.queue.single().source is LightAudioSource.FileSource)
+        assertEquals(30_000L, handle.seekedToMs)
+        assertTrue(handle.isPlaying.value)
+        assertTrue(controller.nowPlaying.value?.fromDownload == true)
+        controller.shutdownForTest()
+    }
+
+    @Test
     fun `attach fails cleanly when the player never readies`() = runTest {
         val handle = FakePlayerHandle().apply { ready = false }
         val controller = PlaybackController(
