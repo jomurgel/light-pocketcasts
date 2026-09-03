@@ -60,6 +60,16 @@ class HomeViewModel(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private var refreshedThisSession = false
+    private var lastQueueSyncMs = 0L
+
+    /** Re-sync the queue whenever Home comes back on screen (throttled). */
+    override fun onScreenShow(screen: com.thelightphone.sdk.SimpleLightScreen<Unit>) {
+        super.onScreenShow(screen)
+        val now = System.currentTimeMillis()
+        if (now - lastQueueSyncMs < 30_000) return
+        lastQueueSyncMs = now
+        viewModelScope.launch { upNextQueue.sync() }
+    }
 
     init {
         viewModelScope.launch {

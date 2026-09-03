@@ -167,8 +167,13 @@ class PlayerScreen(
                         .padding(horizontal = 1f.gridUnitsAsDp()),
                 ) {
                     val head = queue.firstOrNull()
+                    // An actively playing local session is the truth; otherwise
+                    // the synced queue head is (it may have moved on another
+                    // device while we were paused or away).
+                    val localIsCurrent = nowPlaying != null &&
+                        (playing || nowPlaying?.episodeUuid == head?.episodeUuid || head == null)
                     when {
-                        nowPlaying != null -> {
+                        localIsCurrent -> {
                             LightText(
                                 text = nowPlaying?.episodeTitle.orEmpty(),
                                 variant = LightTextVariant.Heading,
@@ -249,7 +254,13 @@ class PlayerScreen(
                         LightBarButton.LightIcon(
                             if (playing) LightIcons.PAUSE else LightIcons.PLAY,
                             onClick = {
-                                if (nowPlaying == null && queue.isNotEmpty()) {
+                                val head = queue.firstOrNull()
+                                val localIsCurrent = nowPlaying != null &&
+                                    (playing || nowPlaying?.episodeUuid == head?.episodeUuid || head == null)
+                                if (localIsCurrent) {
+                                    viewModel.togglePlayPause()
+                                } else if (head != null) {
+                                    // Head changed elsewhere: start it fresh.
                                     viewModel.resumeQueueHead()
                                 } else {
                                     viewModel.togglePlayPause()
