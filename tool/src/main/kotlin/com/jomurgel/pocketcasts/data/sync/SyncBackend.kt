@@ -15,7 +15,29 @@ interface SyncBackend {
      * receive the authoritative queue when it differs from [serverModified].
      */
     suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult
+
+    /** Per-episode user state (progress, archived, starred) for one podcast. */
+    suspend fun fetchEpisodeUserStates(podcastUuid: String): List<RemoteEpisodeUserState>
+
+    /** Push archive/starred changes; throws SyncException on failure. */
+    suspend fun pushEpisodeFlags(changes: List<RemoteEpisodeFlagChange>)
 }
+
+data class RemoteEpisodeUserState(
+    val uuid: String,
+    val positionSec: Long,
+    val playStatus: Int,
+    val archived: Boolean,
+    val starred: Boolean,
+)
+
+data class RemoteEpisodeFlagChange(
+    val episodeUuid: String,
+    val podcastUuid: String,
+    val archived: Boolean?,
+    val starred: Boolean?,
+    val modifiedAtMs: Long,
+)
 
 /** Queue actions, matching Pocket Casts change-log values. */
 object QueueAction {

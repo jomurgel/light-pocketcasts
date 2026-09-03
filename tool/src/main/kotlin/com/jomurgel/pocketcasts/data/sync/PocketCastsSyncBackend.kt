@@ -3,6 +3,9 @@ package com.jomurgel.pocketcasts.data.sync
 import com.jomurgel.pocketcasts.data.api.PocketCastsSyncApi
 import com.jomurgel.pocketcasts.data.api.UpNextBodyDto
 import com.jomurgel.pocketcasts.data.api.UpNextChangeDto
+import com.jomurgel.pocketcasts.data.api.EpisodeRecordDto
+import com.jomurgel.pocketcasts.data.api.RecordDto
+import com.jomurgel.pocketcasts.data.api.SyncUpdateRequestDto
 import com.jomurgel.pocketcasts.data.api.UpNextSyncRequestDto
 import com.jomurgel.pocketcasts.data.db.PlayStatus
 import java.time.Instant
@@ -68,6 +71,39 @@ class PocketCastsSyncBackend(
         )
     }
 
+    override suspend fun fetchEpisodeUserStates(podcastUuid: String): List<RemoteEpisodeUserState> =
+        api.podcastEpisodes(podcastUuid).episodes.map {
+            RemoteEpisodeUserState(
+                uuid = it.uuid,
+                positionSec = it.playedUpTo,
+                playStatus = it.playingStatus.coerceIn(PlayStatus.UNPLAYED, PlayStatus.COMPLETE),
+                archived = it.isDeleted,
+                starred = it.starred,
+            )
+        }
+
+    override suspend fun pushEpisodeFlags(changes: List<RemoteEpisodeFlagChange>) {
+        if (changes.isEmpty()) return
+        api.pushEpisodeRecords(
+            SyncUpdateRequestDto(
+                deviceUtcTimeMs = now(),
+                deviceId = DEVICE_ID,
+                records = changes.map {
+                    RecordDto(
+                        EpisodeRecordDto(
+                            uuid = it.episodeUuid,
+                            podcastUuid = it.podcastUuid,
+                            isDeleted = it.archived,
+                            isDeletedModified = it.archived?.let { _ -> it.modifiedAtMs },
+                            starred = it.starred,
+                            starredModified = it.starred?.let { _ -> it.modifiedAtMs },
+                        ),
+                    )
+                },
+            ),
+        )
+    }
+
     override suspend fun fetchInProgress(): List<RemoteEpisodeState> =
         api.inProgress().episodes.mapNotNull { state ->
             val podcastUuid = state.podcastUuid ?: return@mapNotNull null
@@ -79,6 +115,8 @@ class PocketCastsSyncBackend(
             )
         }
 }
+
+private const val DEVICE_ID = "lightphone-pocketcasts"
 
 internal fun isoToEpochMs(value: String?): Long {
     if (value.isNullOrBlank()) return 0

@@ -36,6 +36,14 @@ class PocketCastsSyncApi(
     internal suspend fun upNextSync(request: UpNextSyncRequestDto): UpNextSyncResponseDto =
         authorizedPost("$apiBase/up_next/sync", request)
 
+    internal suspend fun podcastEpisodes(podcastUuid: String): PodcastEpisodesResponseDto =
+        authorizedPost("$apiBase/user/podcast/episodes", PodcastEpisodesRequestDto(podcastUuid))
+
+    /** Push archive/starred flags as sync records; response is ignorable. */
+    internal suspend fun pushEpisodeRecords(request: SyncUpdateRequestDto) {
+        authorizedPostNoContent("$apiBase/user/sync/update", request)
+    }
+
     /** Push one episode's position/status. Response body is empty. */
     internal suspend fun pushEpisodeProgress(update: EpisodeSyncRequestDto) {
         authorizedPostNoContent("$apiBase/sync/update_episode", update)

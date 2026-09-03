@@ -16,6 +16,8 @@ const val CACHE_BASE_URL = "https://cache.pocketcasts.com"
 val pocketCastsJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
+    // Record pushes must omit unset optional fields entirely.
+    explicitNulls = false
 }
 
 /**

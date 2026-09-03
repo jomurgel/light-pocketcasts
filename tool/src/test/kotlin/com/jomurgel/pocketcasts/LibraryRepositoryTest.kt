@@ -42,6 +42,10 @@ private class FakeBackend(
 
     override suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult =
         RemoteQueueResult(serverModified, null)
+
+    override suspend fun fetchEpisodeUserStates(podcastUuid: String): List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeUserState> = emptyList()
+
+    override suspend fun pushEpisodeFlags(changes: List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeFlagChange>) = Unit
 }
 
 private fun remoteEpisode(uuid: String, podcast: String, published: Long = 1000) =

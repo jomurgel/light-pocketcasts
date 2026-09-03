@@ -74,6 +74,10 @@ private class NoopQueueBackend : SyncBackend {
     override suspend fun fetchInProgress(): List<RemoteEpisodeState> = emptyList()
     override suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult =
         RemoteQueueResult(serverModified + 1, null)
+
+    override suspend fun fetchEpisodeUserStates(podcastUuid: String): List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeUserState> = emptyList()
+
+    override suspend fun pushEpisodeFlags(changes: List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeFlagChange>) = Unit
 }
 
 class PlaybackControllerTest {

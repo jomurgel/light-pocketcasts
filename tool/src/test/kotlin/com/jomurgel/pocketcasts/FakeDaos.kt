@@ -2,6 +2,8 @@ package com.jomurgel.pocketcasts
 
 import com.jomurgel.pocketcasts.data.db.EpisodeDao
 import com.jomurgel.pocketcasts.data.db.EpisodeEntity
+import com.jomurgel.pocketcasts.data.db.PendingEpisodeStateDao
+import com.jomurgel.pocketcasts.data.db.PendingEpisodeStateEntity
 import com.jomurgel.pocketcasts.data.db.PodcastDao
 import com.jomurgel.pocketcasts.data.db.PodcastEntity
 import kotlinx.coroutines.flow.Flow
@@ -56,6 +58,9 @@ class FakeEpisodeDao : EpisodeDao {
 
     /** Uuids with a pending local push; applyServerProgress skips these. */
     val pendingUuids = mutableSetOf<String>()
+
+    /** Uuids with a pending flag push; applyServerFlags skips these. */
+    val pendingFlagUuids = mutableSetOf<String>()
 
     override fun observeByPodcast(podcastUuid: String): Flow<List<EpisodeEntity>> =
         store.map { map ->
@@ -142,4 +147,37 @@ class FakeEpisodeDao : EpisodeDao {
 
     override suspend fun downloadedEpisodes(): List<EpisodeEntity> =
         store.value.values.filter { it.downloadState == com.jomurgel.pocketcasts.data.db.DownloadState.DONE }
+
+    override suspend fun applyServerFlags(uuid: String, archived: Boolean, starred: Boolean) {
+        if (uuid in pendingFlagUuids) return
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (uuid to existing.copy(isArchived = archived, starred = starred))
+    }
+
+    override suspend fun updateArchived(uuid: String, archived: Boolean) {
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (uuid to existing.copy(isArchived = archived))
+    }
+
+    override suspend fun updateStarred(uuid: String, starred: Boolean) {
+        val existing = store.value[uuid] ?: return
+        store.value = store.value + (uuid to existing.copy(starred = starred))
+    }
+}
+
+
+class FakePendingEpisodeStateDao : PendingEpisodeStateDao {
+    val rows = linkedMapOf<String, PendingEpisodeStateEntity>()
+
+    override suspend fun upsert(entity: PendingEpisodeStateEntity) {
+        rows[entity.episodeUuid] = entity
+    }
+
+    override suspend fun get(episodeUuid: String): PendingEpisodeStateEntity? = rows[episodeUuid]
+
+    override suspend fun all(): List<PendingEpisodeStateEntity> = rows.values.toList()
+
+    override suspend fun delete(episodeUuid: String, queuedAt: Long) {
+        if (rows[episodeUuid]?.queuedAt == queuedAt) rows.remove(episodeUuid)
+    }
 }

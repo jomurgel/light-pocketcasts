@@ -9,6 +9,7 @@ import com.jomurgel.pocketcasts.data.api.PocketCastsSyncApi
 import com.jomurgel.pocketcasts.data.api.pocketCastsHttpClient
 import com.jomurgel.pocketcasts.data.db.PocketCastsDatabase
 import com.jomurgel.pocketcasts.data.DownloadManager
+import com.jomurgel.pocketcasts.data.EpisodeStateRepository
 import com.jomurgel.pocketcasts.data.ProgressRepository
 import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.data.sync.PocketCastsSyncBackend
@@ -47,6 +48,9 @@ object AppGraph {
     @Volatile
     private var downloads: DownloadManager? = null
 
+    @Volatile
+    private var episodeState: EpisodeStateRepository? = null
+
     fun authRepository(context: SealedLightContext): AuthRepository {
         return auth ?: synchronized(this) {
             auth ?: buildAuth(context).also { auth = it }
@@ -68,6 +72,21 @@ object AppGraph {
     fun upNextQueue(context: SealedLightContext): UpNextQueue {
         return upNext ?: synchronized(this) {
             upNext ?: buildUpNext(context).also { upNext = it }
+        }
+    }
+
+    fun episodeStateRepository(context: SealedLightContext): EpisodeStateRepository {
+        return episodeState ?: synchronized(this) {
+            episodeState ?: run {
+                val authRepository = authRepository(context)
+                val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
+                EpisodeStateRepository(
+                    episodeDao = db(context).episodeDao(),
+                    pendingDao = db(context).pendingEpisodeStateDao(),
+                    backend = PocketCastsSyncBackend(syncApi),
+                    schedulePush = { LightWork.enqueue(context, PUSH_PROGRESS_JOB_KEY) },
+                ).also { episodeState = it }
+            }
         }
     }
 
@@ -114,8 +133,30 @@ object AppGraph {
     }
 
     private fun db(context: SealedLightContext): PocketCastsDatabase {
-        return database ?: context.buildDatabase(PocketCastsDatabase::class.java, "pocketcasts.db")
-            .also { database = it }
+        return database ?: run {
+            ensureSchemaVersion(context)
+            context.buildDatabase(PocketCastsDatabase::class.java, "pocketcasts.db")
+                .also { database = it }
+        }
+    }
+
+    /**
+     * Self-managed destructive migration: the SDK's buildDatabase exposes no
+     * Room migration hooks, so on a schema bump we delete the database and let
+     * the caches rebuild from the server. Local-only download files are swept
+     * as orphans afterward.
+     */
+    private const val SCHEMA_VERSION = "2"
+
+    private fun ensureSchemaVersion(context: SealedLightContext) {
+        val marker = File(context.filesDir, "db_schema_version")
+        val current = runCatching { marker.readText().trim() }.getOrNull()
+        if (current == SCHEMA_VERSION) return
+        val dbDir = File(context.filesDir.parentFile, "databases")
+        listOf("pocketcasts.db", "pocketcasts.db-wal", "pocketcasts.db-shm").forEach {
+            File(dbDir, it).delete()
+        }
+        marker.writeText(SCHEMA_VERSION)
     }
 
     private fun buildAuth(context: SealedLightContext): AuthRepository {

@@ -129,6 +129,35 @@ interface EpisodeDao {
 
     @Query("SELECT * FROM episodes WHERE download_state = ${DownloadState.DONE}")
     suspend fun downloadedEpisodes(): List<EpisodeEntity>
+
+    /** Server flags overlay; skipped while a local flag push is pending. */
+    @Query(
+        "UPDATE episodes SET is_archived = :archived, starred = :starred WHERE uuid = :uuid " +
+            "AND uuid NOT IN (SELECT episode_uuid FROM pending_episode_state)",
+    )
+    suspend fun applyServerFlags(uuid: String, archived: Boolean, starred: Boolean)
+
+    @Query("UPDATE episodes SET is_archived = :archived WHERE uuid = :uuid")
+    suspend fun updateArchived(uuid: String, archived: Boolean)
+
+    @Query("UPDATE episodes SET starred = :starred WHERE uuid = :uuid")
+    suspend fun updateStarred(uuid: String, starred: Boolean)
+}
+
+@Dao
+interface PendingEpisodeStateDao {
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: PendingEpisodeStateEntity)
+
+    @Query("SELECT * FROM pending_episode_state WHERE episode_uuid = :episodeUuid")
+    suspend fun get(episodeUuid: String): PendingEpisodeStateEntity?
+
+    @Query("SELECT * FROM pending_episode_state ORDER BY queued_at ASC")
+    suspend fun all(): List<PendingEpisodeStateEntity>
+
+    @Query("DELETE FROM pending_episode_state WHERE episode_uuid = :episodeUuid AND queued_at = :queuedAt")
+    suspend fun delete(episodeUuid: String, queuedAt: Long)
 }
 
 @Dao

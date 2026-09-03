@@ -31,10 +31,8 @@ class DownloadManager(
     init {
         downloadsDir.mkdirs()
         scope.launch {
-            android.util.Log.d(TAG, "recovery: resetting interrupted downloads")
             episodeDao.resetInterruptedDownloads()
             sweepOrphans()
-            android.util.Log.d(TAG, "recovery complete; consuming queue")
             for (uuid in requests) {
                 process(uuid)
             }
@@ -125,7 +123,6 @@ class DownloadManager(
     }
 
     private companion object {
-        const val TAG = "PocketCastsDownloads"
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
     }
 }

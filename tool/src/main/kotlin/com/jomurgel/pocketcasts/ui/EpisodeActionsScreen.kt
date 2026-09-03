@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
 import com.jomurgel.pocketcasts.AppGraph
 import com.jomurgel.pocketcasts.data.DownloadManager
+import com.jomurgel.pocketcasts.data.EpisodeStateRepository
 import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.data.db.DownloadState
@@ -39,6 +40,7 @@ class EpisodeActionsViewModel(
     private val library: LibraryRepository,
     private val upNextQueue: UpNextQueue,
     private val downloadManager: DownloadManager,
+    private val stateRepository: EpisodeStateRepository,
     private val episodeUuid: String,
 ) : LightViewModel<Unit>() {
 
@@ -55,6 +57,20 @@ class EpisodeActionsViewModel(
     }
 
     fun download() = downloadManager.enqueue(episodeUuid)
+
+    fun toggleArchived() {
+        val episode = _episode.value ?: return
+        viewModelScope.launch {
+            stateRepository.setArchived(episodeUuid, episode.podcastUuid, !episode.isArchived)
+        }
+    }
+
+    fun toggleStarred() {
+        val episode = _episode.value ?: return
+        viewModelScope.launch {
+            stateRepository.setStarred(episodeUuid, episode.podcastUuid, !episode.starred)
+        }
+    }
 
     fun deleteDownload() {
         viewModelScope.launch { downloadManager.delete(episodeUuid) }
@@ -87,6 +103,7 @@ class EpisodeActionsScreen(
         AppGraph.libraryRepository(lightContext),
         AppGraph.upNextQueue(lightContext),
         AppGraph.downloadManager(lightContext),
+        AppGraph.episodeStateRepository(lightContext),
         episodeUuid,
     )
 
@@ -149,6 +166,9 @@ class EpisodeActionsScreen(
                 }
                 ActionRow("PLAY NEXT") { viewModel.playNext() }
                 ActionRow("PLAY LAST") { viewModel.playLast() }
+
+                ActionRow(if (current.isArchived) "UNARCHIVE" else "ARCHIVE") { viewModel.toggleArchived() }
+                ActionRow(if (current.starred) "UNSTAR" else "STAR") { viewModel.toggleStarred() }
 
                 when (current.downloadState) {
                     DownloadState.QUEUED -> ActionRow("QUEUED…") {}

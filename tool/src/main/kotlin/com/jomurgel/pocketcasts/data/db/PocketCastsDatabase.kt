@@ -8,14 +8,16 @@ import androidx.room.RoomDatabase
         PodcastEntity::class,
         EpisodeEntity::class,
         PendingProgressEntity::class,
+        PendingEpisodeStateEntity::class,
         SyncMetaEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class PocketCastsDatabase : RoomDatabase() {
     abstract fun podcastDao(): PodcastDao
     abstract fun episodeDao(): EpisodeDao
     abstract fun pendingProgressDao(): PendingProgressDao
+    abstract fun pendingEpisodeStateDao(): PendingEpisodeStateDao
     abstract fun syncMetaDao(): SyncMetaDao
 }

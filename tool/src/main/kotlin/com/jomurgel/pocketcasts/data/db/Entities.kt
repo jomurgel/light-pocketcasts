@@ -57,6 +57,9 @@ data class EpisodeEntity(
     @ColumnInfo(name = "position_sec") val positionSec: Long = 0,
     @ColumnInfo(name = "play_status") val playStatus: Int = PlayStatus.UNPLAYED,
     @ColumnInfo(name = "position_updated_at") val positionUpdatedAt: Long = 0,
+    // account flags (synced)
+    @ColumnInfo(name = "is_archived") val isArchived: Boolean = false,
+    @ColumnInfo(name = "starred") val starred: Boolean = false,
     // download state (local only)
     @ColumnInfo(name = "download_state") val downloadState: Int = DownloadState.NONE,
     @ColumnInfo(name = "download_progress") val downloadProgress: Int = 0,
@@ -71,6 +74,16 @@ data class PendingProgressEntity(
     @ColumnInfo(name = "position_sec") val positionSec: Long,
     @ColumnInfo(name = "duration_sec") val durationSec: Long,
     @ColumnInfo(name = "status") val status: Int,
+    @ColumnInfo(name = "queued_at") val queuedAt: Long,
+)
+
+/** Outbox for archive/starred pushes via /user/sync/update records. */
+@Entity(tableName = "pending_episode_state")
+data class PendingEpisodeStateEntity(
+    @PrimaryKey @ColumnInfo(name = "episode_uuid") val episodeUuid: String,
+    @ColumnInfo(name = "podcast_uuid") val podcastUuid: String,
+    @ColumnInfo(name = "archived") val archived: Boolean?,
+    @ColumnInfo(name = "starred") val starred: Boolean?,
     @ColumnInfo(name = "queued_at") val queuedAt: Long,
 )
 

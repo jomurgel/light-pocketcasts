@@ -33,17 +33,76 @@ import com.thelightphone.sdk.ui.lightClickable
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+enum class EpisodeFilter(val label: String) {
+    ALL("ALL"),
+    UNPLAYED("UNPLAYED"),
+    IN_PROGRESS("IN PROGRESS"),
+}
+
+data class EpisodeListUiState(
+    val visible: List<EpisodeEntity> = emptyList(),
+    val archivedCount: Int = 0,
+    val filter: EpisodeFilter = EpisodeFilter.ALL,
+    val showArchived: Boolean = false,
+)
+
+/** Archived episodes hide by default; the filter narrows by play state. */
+internal fun filterEpisodes(
+    episodes: List<EpisodeEntity>,
+    filter: EpisodeFilter,
+    showArchived: Boolean,
+): List<EpisodeEntity> =
+    episodes
+        .filter { showArchived || !it.isArchived }
+        .filter {
+            when (filter) {
+                EpisodeFilter.ALL -> true
+                EpisodeFilter.UNPLAYED -> it.playStatus == PlayStatus.UNPLAYED
+                EpisodeFilter.IN_PROGRESS -> it.playStatus == PlayStatus.IN_PROGRESS
+            }
+        }
 
 class EpisodeListViewModel(
     repository: LibraryRepository,
     podcastUuid: String,
 ) : LightViewModel<Unit>() {
 
-    val episodes: StateFlow<List<EpisodeEntity>> = repository.episodesFor(podcastUuid)
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    private val filter = MutableStateFlow(EpisodeFilter.ALL)
+    private val showArchived = MutableStateFlow(false)
+
+    val uiState: StateFlow<EpisodeListUiState> = combine(
+        repository.episodesFor(podcastUuid),
+        filter,
+        showArchived,
+    ) { episodes, activeFilter, archived ->
+        EpisodeListUiState(
+            visible = filterEpisodes(episodes, activeFilter, archived),
+            archivedCount = episodes.count { it.isArchived },
+            filter = activeFilter,
+            showArchived = archived,
+        )
+    }.stateIn(viewModelScope, SharingStarted.Lazily, EpisodeListUiState())
+
+    init {
+        // Pull this show's account state (progress, archived, starred).
+        viewModelScope.launch { repository.refreshEpisodeStates(podcastUuid) }
+    }
+
+    fun cycleFilter() {
+        val values = EpisodeFilter.entries
+        filter.value = values[(values.indexOf(filter.value) + 1) % values.size]
+    }
+
+    fun toggleArchived() {
+        showArchived.value = !showArchived.value
+    }
 }
 
 class EpisodeListScreen(
@@ -61,7 +120,7 @@ class EpisodeListScreen(
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
-        val episodes by viewModel.episodes.collectAsState()
+        val uiState by viewModel.uiState.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -75,20 +134,39 @@ class EpisodeListScreen(
                         onClick = { goBack(null) },
                     ),
                     center = LightTopBarCenter.Text(podcastTitle),
-                    rightButton = null,
+                    rightButton = LightBarButton.Text(
+                        text = uiState.filter.label,
+                        onClick = { viewModel.cycleFilter() },
+                    ),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (episodes.isEmpty()) {
+                if (uiState.archivedCount > 0 || uiState.showArchived) {
                     LightText(
-                        text = "No episodes yet.",
+                        text = if (uiState.showArchived) {
+                            "SHOWING ARCHIVED · TAP TO HIDE"
+                        } else {
+                            "${uiState.archivedCount} ARCHIVED HIDDEN · TAP TO SHOW"
+                        },
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .lightClickable { viewModel.toggleArchived() }
+                            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
+                    )
+                }
+
+                if (uiState.visible.isEmpty()) {
+                    LightText(
+                        text = "Nothing here with this filter.",
                         variant = LightTextVariant.Copy,
                         lighten = true,
                         modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
                     )
                 } else {
                     LazyColumn {
-                        items(episodes, key = { it.uuid }) { episode ->
+                        items(uiState.visible, key = { it.uuid }) { episode ->
                             EpisodeRow(episode) {
                                 navigateTo(
                                     screenFactory = { EpisodeActionsScreen(it, episode.uuid) },
@@ -131,13 +209,17 @@ internal fun episodeDetailLine(episode: EpisodeEntity): String {
         episode.positionSec > 0 -> " · at ${formatDuration(episode.positionSec)}"
         else -> ""
     }
+    val flags = buildString {
+        if (episode.starred) append(" · starred")
+        if (episode.isArchived) append(" · archived")
+    }
     val downloaded = when (episode.downloadState) {
         com.jomurgel.pocketcasts.data.db.DownloadState.DONE -> " · downloaded"
         com.jomurgel.pocketcasts.data.db.DownloadState.DOWNLOADING -> " · downloading"
         com.jomurgel.pocketcasts.data.db.DownloadState.QUEUED -> " · queued"
         else -> ""
     }
-    return "$date · $duration$progress$downloaded"
+    return "$date · $duration$progress$flags$downloaded"
 }
 
 internal fun formatDuration(totalSec: Long): String {

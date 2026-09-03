@@ -51,6 +51,10 @@ private class FakeQueueBackend : SyncBackend {
         lastChanges = changes
         return response
     }
+
+    override suspend fun fetchEpisodeUserStates(podcastUuid: String): List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeUserState> = emptyList()
+
+    override suspend fun pushEpisodeFlags(changes: List<com.jomurgel.pocketcasts.data.sync.RemoteEpisodeFlagChange>) = Unit
 }
 
 private fun item(uuid: String) = QueueItem(uuid, "p-$uuid", "Episode $uuid", "https://cdn.test/$uuid.mp3")

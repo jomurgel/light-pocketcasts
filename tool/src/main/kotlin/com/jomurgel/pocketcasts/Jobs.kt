@@ -16,10 +16,13 @@ val pushProgress: LightJobHandler = { ctx, _ ->
     // Queue sync piggybacks on every progress push; failures self-heal on the
     // next sync, so its result doesn't affect the job outcome.
     AppGraph.upNextQueue(ctx).sync()
-    when (AppGraph.progressRepository(ctx).drain()) {
-        is ProgressRepository.DrainResult.Done -> LightJobResult.Success()
-        is ProgressRepository.DrainResult.Retry -> LightJobResult.Retry
+    val results = listOf(
+        AppGraph.progressRepository(ctx).drain(),
+        AppGraph.episodeStateRepository(ctx).drain(),
+    )
+    when {
+        results.any { it is ProgressRepository.DrainResult.Retry } -> LightJobResult.Retry
         // Signed out: nothing to push until the user signs in again.
-        is ProgressRepository.DrainResult.SignedOut -> LightJobResult.Success()
+        else -> LightJobResult.Success()
     }
 }

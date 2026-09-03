@@ -112,3 +112,49 @@ internal data class QueueEpisodeDto(
     @SerialName("podcast") val podcast: String? = null,
     @SerialName("published") val published: String? = null,
 )
+
+// --- record sync push (/user/sync/update, proto3 JSON mapping) ---
+
+@Serializable
+internal data class SyncUpdateRequestDto(
+    @SerialName("deviceUtcTimeMs") val deviceUtcTimeMs: Long,
+    @SerialName("lastModified") val lastModified: Long = 0,
+    @SerialName("deviceId") val deviceId: String,
+    @SerialName("records") val records: List<RecordDto>,
+)
+
+@Serializable
+internal data class RecordDto(
+    @SerialName("episode") val episode: EpisodeRecordDto,
+)
+
+@Serializable
+internal data class EpisodeRecordDto(
+    @SerialName("uuid") val uuid: String,
+    @SerialName("podcastUuid") val podcastUuid: String,
+    @SerialName("isDeleted") val isDeleted: Boolean? = null,
+    @SerialName("isDeletedModified") val isDeletedModified: Long? = null,
+    @SerialName("starred") val starred: Boolean? = null,
+    @SerialName("starredModified") val starredModified: Long? = null,
+)
+
+// --- per-podcast user state (/user/podcast/episodes) ---
+
+@Serializable
+internal data class PodcastEpisodesRequestDto(
+    @SerialName("uuid") val uuid: String,
+)
+
+@Serializable
+internal data class PodcastEpisodesResponseDto(
+    @SerialName("episodes") val episodes: List<EpisodeUserStateDto> = emptyList(),
+)
+
+@Serializable
+internal data class EpisodeUserStateDto(
+    @SerialName("uuid") val uuid: String,
+    @SerialName("playingStatus") val playingStatus: Int = 1,
+    @SerialName("playedUpTo") val playedUpTo: Long = 0,
+    @SerialName("isDeleted") val isDeleted: Boolean = false,
+    @SerialName("starred") val starred: Boolean = false,
+)

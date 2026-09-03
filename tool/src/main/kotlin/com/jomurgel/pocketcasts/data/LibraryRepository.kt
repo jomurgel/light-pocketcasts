@@ -37,6 +37,24 @@ class LibraryRepository(
 
     suspend fun episode(uuid: String): EpisodeEntity? = episodeDao.get(uuid)
 
+    /**
+     * Overlay per-episode account state (progress, archived, starred) for one
+     * podcast — called when its episode list opens. Progress respects pending
+     * local pushes (DAO guard); flags respect the flag outbox likewise.
+     */
+    suspend fun refreshEpisodeStates(podcastUuid: String) {
+        val states = try {
+            backend.fetchEpisodeUserStates(podcastUuid)
+        } catch (_: SyncException) {
+            return // cache stands
+        }
+        val timestamp = now()
+        states.forEach { state ->
+            episodeDao.applyServerProgress(state.uuid, state.positionSec, state.playStatus, timestamp)
+            episodeDao.applyServerFlags(state.uuid, state.archived, state.starred)
+        }
+    }
+
     fun observeEpisode(uuid: String): Flow<EpisodeEntity?> = episodeDao.observe(uuid)
 
     suspend fun podcastTitle(uuid: String): String = podcastDao.get(uuid)?.title ?: ""
