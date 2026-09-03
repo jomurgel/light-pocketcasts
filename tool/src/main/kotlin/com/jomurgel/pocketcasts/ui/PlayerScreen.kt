@@ -18,6 +18,7 @@ import com.jomurgel.pocketcasts.data.LibraryRepository
 import com.jomurgel.pocketcasts.data.QueueItem
 import com.jomurgel.pocketcasts.data.UpNextQueue
 import com.jomurgel.pocketcasts.playback.LightPlayerHandle
+import com.jomurgel.pocketcasts.playback.NowPlaying
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -51,6 +52,7 @@ class PlayerViewModel(
 ) : LightViewModel<Unit>() {
 
     val nowPlaying = controller.nowPlaying
+    val isPreparing = controller.isPreparing
     val queue = upNextQueue.queue
     val positionMs = controller.positionMs
     val durationMs = controller.durationMs
@@ -139,6 +141,7 @@ class PlayerScreen(
         val positionMs by viewModel.positionMs.collectAsState()
         val durationMs by viewModel.durationMs.collectAsState()
         val playing by viewModel.isPlaying.collectAsState()
+        val preparing by viewModel.isPreparing.collectAsState()
         val speed by viewModel.speed.collectAsState()
         val playbackError by viewModel.playbackError.collectAsState()
         val attachError by viewModel.attachError.collectAsState()
@@ -223,6 +226,15 @@ class PlayerScreen(
                         LightText(
                             text = "Playback problem (${it.kind}). Try again.",
                             variant = LightTextVariant.Detail,
+                        )
+                    }
+
+                    playbackStatusLine(nowPlaying, playing, preparing)?.let { status ->
+                        LightText(
+                            text = status,
+                            variant = LightTextVariant.Fine,
+                            lighten = true,
+                            modifier = Modifier.padding(bottom = 0.25f.gridUnitsAsDp()),
                         )
                     }
 
@@ -325,6 +337,19 @@ private fun UpNextSection(
             lighten = true,
         )
     }
+}
+
+/** One-line answer to "is anything happening?" and "where is this from?". */
+internal fun playbackStatusLine(
+    nowPlaying: NowPlaying?,
+    playing: Boolean,
+    preparing: Boolean,
+): String? = when {
+    nowPlaying == null -> null
+    preparing && !playing -> "LOADING…"
+    playing && nowPlaying.fromDownload -> "PLAYING FROM DOWNLOAD"
+    playing -> "STREAMING"
+    else -> null
 }
 
 internal fun formatClock(ms: Long): String {

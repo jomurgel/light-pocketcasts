@@ -34,6 +34,7 @@ private class FakePlayerHandle : PlayerHandle {
     var queue: List<LightAudioItem> = emptyList()
     var seekedToMs: Long? = null
     var ready = true
+    var autoPlayOnPlay = true
 
     override suspend fun awaitReady(): Boolean = ready
     override fun setMediaQueue(items: List<LightAudioItem>, startIndex: Int) {
@@ -41,7 +42,7 @@ private class FakePlayerHandle : PlayerHandle {
     }
 
     override fun play() {
-        isPlaying.value = true
+        if (autoPlayOnPlay) isPlaying.value = true
     }
 
     override fun pause() {
@@ -140,6 +141,7 @@ class PlaybackControllerTest {
         controller.play(episode(filePath = "/data/episodes/e1.mp3"), "Show One")
         runCurrent()
         assertTrue(handle.queue.single().source is LightAudioSource.FileSource)
+        assertTrue(controller.nowPlaying.value?.fromDownload == true)
         controller.shutdownForTest()
     }
 
@@ -164,6 +166,28 @@ class PlaybackControllerTest {
         handle.pause()
         runCurrent()
         assertEquals(21, pendingDao.rows["e1"]?.positionSec)
+        controller.shutdownForTest()
+    }
+
+    @Test
+    fun `preparing state shows until audio actually rolls`() = runTest {
+        val handle = FakePlayerHandle()
+        // Audio does not start rolling on play() until we say so.
+        handle.autoPlayOnPlay = false
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { episodeDao.get(it) },
+        )
+        assertTrue(controller.attach { handle })
+        controller.play(episode(), "Show One")
+        runCurrent()
+
+        assertTrue(controller.isPreparing.value)
+        assertEquals(false, controller.isPlaying.value)
+
+        handle.isPlaying.value = true // buffering done, audio rolling
+        runCurrent()
+        assertEquals(false, controller.isPreparing.value)
         controller.shutdownForTest()
     }
 

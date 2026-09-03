@@ -152,6 +152,12 @@ class EpisodeActionsScreen(
                     lighten = true,
                     modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
                 )
+                LightText(
+                    text = downloadStatusLine(current),
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                    modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
+                )
 
                 queued?.let {
                     LightText(
@@ -184,6 +190,20 @@ class EpisodeActionsScreen(
 
     @Composable
     private fun ActionRow(label: String, onClick: () -> Unit) {
+        ActionRowImpl(label, onClick)
+    }
+}
+
+internal fun downloadStatusLine(episode: EpisodeEntity): String = when (episode.downloadState) {
+    DownloadState.QUEUED -> "Download queued"
+    DownloadState.DOWNLOADING -> "Downloading… ${episode.downloadProgress}%"
+    DownloadState.DONE -> "Downloaded — plays offline"
+    DownloadState.FAILED -> "Download failed — will stream when played"
+    else -> "Not downloaded — streams when played"
+}
+
+@androidx.compose.runtime.Composable
+private fun ActionRowImpl(label: String, onClick: () -> Unit) {
         LightText(
             text = label,
             variant = LightTextVariant.Heading,
@@ -192,5 +212,4 @@ class EpisodeActionsScreen(
                 .lightClickable(onClick = onClick)
                 .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
         )
-    }
 }

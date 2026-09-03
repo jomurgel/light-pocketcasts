@@ -24,6 +24,8 @@ data class NowPlaying(
     val podcastUuid: String,
     val episodeTitle: String,
     val podcastTitle: String,
+    /** True when the loaded source is a local download rather than a stream. */
+    val fromDownload: Boolean = false,
 )
 
 const val PROGRESS_SAMPLE_INTERVAL_MS = 15_000L
@@ -69,6 +71,10 @@ class PlaybackController(
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    /** True between requesting playback and audio actually rolling. */
+    private val _isPreparing = MutableStateFlow(false)
+    val isPreparing: StateFlow<Boolean> = _isPreparing.asStateFlow()
 
     private val _speed = MutableStateFlow(1.0f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
@@ -118,7 +124,13 @@ class PlaybackController(
 
     fun togglePlayPause() {
         val player = handle ?: return
-        if (player.isPlaying.value) player.pause() else player.play()
+        if (player.isPlaying.value) {
+            _isPreparing.value = false
+            player.pause()
+        } else {
+            _isPreparing.value = true
+            player.play()
+        }
     }
 
     fun skipBack() {
@@ -141,6 +153,7 @@ class PlaybackController(
         if (resumePositionSec > RESUME_MIN_POSITION_SEC) {
             player.seekTo(resumePositionSec * 1000)
         }
+        _isPreparing.value = true
         player.play()
         lastRecordedSec = -1
         recordNow()
@@ -175,20 +188,31 @@ class PlaybackController(
             podcastUuid = item.podcastUuid,
             episodeTitle = item.title,
             podcastTitle = podcastTitleLookup(item.podcastUuid),
+            fromDownload = episodeLookup(item.episodeUuid)?.filePath != null,
         )
     }
 
     private fun mirror(player: PlayerHandle) {
         mirrorJobs += scope.launch { player.positionMs.collect { _positionMs.value = it } }
         mirrorJobs += scope.launch { player.durationMs.collect { _durationMs.value = it } }
-        mirrorJobs += scope.launch { player.error.collect { _error.value = it } }
+        mirrorJobs += scope.launch {
+            player.error.collect { error ->
+                _error.value = error
+                if (error != null) _isPreparing.value = false
+            }
+        }
         mirrorJobs += scope.launch {
             player.currentMediaItemIndex.collect { index -> onIndexChanged(index) }
         }
         mirrorJobs += scope.launch {
             player.isPlaying.collect { playing ->
                 _isPlaying.value = playing
-                if (playing) startSampler() else onPaused()
+                if (playing) {
+                    _isPreparing.value = false
+                    startSampler()
+                } else {
+                    onPaused()
+                }
             }
         }
     }
