@@ -90,7 +90,7 @@ class EpisodeActionsViewModel(
     }
 }
 
-/** Episode detail: play now, queue next/last. Downloads arrive in Task 5. */
+/** Episode detail: play now, queue next/last, download, archive and star. */
 class EpisodeActionsScreen(
     sealedActivity: SealedLightActivity,
     private val episodeUuid: String,

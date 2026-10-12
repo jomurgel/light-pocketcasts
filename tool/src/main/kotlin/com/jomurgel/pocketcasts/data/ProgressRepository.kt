@@ -31,8 +31,26 @@ class ProgressRepository(
 ) {
 
     suspend fun record(episodeUuid: String, podcastUuid: String, positionSec: Long, durationSec: Long) {
+        write(episodeUuid, podcastUuid, positionSec, durationSec, progressStatus(positionSec, durationSec))
+    }
+
+    /**
+     * The episode played through to its end. Says so outright instead of
+     * deriving it from position and duration, which reads as "unplayed" when
+     * the duration isn't known (episodes queued from another device).
+     */
+    suspend fun recordCompleted(episodeUuid: String, podcastUuid: String, durationSec: Long) {
+        write(episodeUuid, podcastUuid, durationSec, durationSec, PlayStatus.COMPLETE)
+    }
+
+    private suspend fun write(
+        episodeUuid: String,
+        podcastUuid: String,
+        positionSec: Long,
+        durationSec: Long,
+        status: Int,
+    ) {
         val timestamp = now()
-        val status = progressStatus(positionSec, durationSec)
         episodeDao.updateLocalProgress(episodeUuid, positionSec, status, timestamp)
         pendingProgressDao.upsert(
             PendingProgressEntity(

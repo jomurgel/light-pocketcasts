@@ -134,7 +134,6 @@ class PlayerViewModel(
     fun removeFromQueue(episodeUuid: String) {
         viewModelScope.launch {
             upNextQueue.remove(episodeUuid)
-            controller.refreshQueueInPlayer()
             upNextQueue.sync()
         }
     }
@@ -142,7 +141,6 @@ class PlayerViewModel(
     fun moveToTop(episodeUuid: String) {
         viewModelScope.launch {
             upNextQueue.moveToTop(episodeUuid)
-            controller.refreshQueueInPlayer()
             upNextQueue.sync()
         }
     }
