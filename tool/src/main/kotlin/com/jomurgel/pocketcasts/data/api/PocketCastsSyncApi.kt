@@ -14,6 +14,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Authorized calls to api.pocketcasts.com plus unauthenticated catalog reads
@@ -57,29 +58,15 @@ class PocketCastsSyncApi(
         return response.parse()
     }
 
-    private suspend inline fun <reified B : Any, reified R> authorizedPost(url: String, requestBody: B): R {
-        var bearer = session.bearer() ?: throw SyncException.SignedOut
-        var attempt = 0
-        while (true) {
-            val response = guard {
-                client.post(url) {
-                    header(HttpHeaders.Authorization, "Bearer $bearer")
-                    contentType(ContentType.Application.Json)
-                    setBody(requestBody)
-                }
-            }
-            when {
-                response.status.isSuccess() -> return response.parse()
-                response.status == HttpStatusCode.Unauthorized && attempt == 0 -> {
-                    attempt++
-                    bearer = refreshBearer(bearer)
-                }
-                else -> throw SyncException.Server(response.status.value)
-            }
-        }
-    }
+    private suspend inline fun <reified B : Any, reified R> authorizedPost(url: String, requestBody: B): R =
+        authorizedCall(url, requestBody).parse()
 
     private suspend inline fun <reified B : Any> authorizedPostNoContent(url: String, requestBody: B) {
+        authorizedCall(url, requestBody)
+    }
+
+    /** Returns the successful response; refreshes the token once on a 401. */
+    private suspend inline fun <reified B : Any> authorizedCall(url: String, requestBody: B): HttpResponse {
         var bearer = session.bearer() ?: throw SyncException.SignedOut
         var attempt = 0
         while (true) {
@@ -91,7 +78,7 @@ class PocketCastsSyncApi(
                 }
             }
             when {
-                response.status.isSuccess() -> return
+                response.status.isSuccess() -> return response
                 response.status == HttpStatusCode.Unauthorized && attempt == 0 -> {
                     attempt++
                     bearer = refreshBearer(bearer)
@@ -119,6 +106,8 @@ class PocketCastsSyncApi(
 
     private suspend inline fun <reified R> HttpResponse.parse(): R = try {
         body()
+    } catch (error: CancellationException) {
+        throw error
     } catch (error: Exception) {
         throw SyncException.Server(status.value, "Unreadable response: ${error.message}")
     }
