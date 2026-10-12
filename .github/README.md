@@ -4,6 +4,11 @@ I've used Pocket Casts for years, and the one thing keeping a smartphone in my p
 
 So this is a tool for the Light Phone III that signs into your Pocket Casts account and picks up where your other devices left off.
 
+<p>
+  <img src="screenshots/library.png" alt="The library screen listing subscribed podcasts" width="320">
+  <img src="screenshots/player.png" alt="The Now Playing screen streaming an episode" width="320">
+</p>
+
 **This is unofficial.** It isn't made by, endorsed by, or affiliated with Pocket Casts or Automattic. It talks to the same API their web player uses, which is undocumented and could change or close whenever they like. If that happens, this tool breaks until someone (probably me) fixes it.
 
 ## What it does
