@@ -23,6 +23,6 @@ val pushProgress: LightJobHandler = { ctx, _ ->
     when {
         results.any { it is ProgressRepository.DrainResult.Retry } -> LightJobResult.Retry
         // Signed out: nothing to push until the user signs in again.
-        else -> LightJobResult.Success()
+        else -> LightJobResult.Success(outputFilePath = null, message = null)
     }
 }
