@@ -205,4 +205,32 @@ class LibraryRepositoryTest {
 
         assertEquals(RefreshState.Idle, repository.refreshState.value)
     }
+
+    @Test
+    fun `stopping a refresh in flight ends its writes`() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val subscribed = FakeBackend(
+            subscriptions = listOf(
+                RemotePodcast("p1", "Show One", "Author A"),
+                RemotePodcast("p2", "Show Two", "Author B"),
+            ),
+        )
+        val backend = object : SyncBackend by subscribed {
+            override suspend fun fetchEpisodes(podcastUuid: String): List<RemoteEpisode> {
+                if (podcastUuid == "p2") gate.await()
+                return listOf(remoteEpisode("e-$podcastUuid", podcastUuid))
+            }
+        }
+        val repository = repo(backend)
+        val job = launch { repository.refresh() }
+        testScheduler.runCurrent()
+        assertEquals(listOf("p1"), podcastDao.allUuids())
+
+        repository.stopRefresh()
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(listOf("p1"), podcastDao.allUuids())
+        assertEquals(RefreshState.Idle, repository.refreshState.value)
+    }
 }

@@ -189,13 +189,15 @@ object AppGraph {
 
     /**
      * Removes everything belonging to the signed-in account. Order matters:
-     * playback stops before its files go, and the queue's in-memory copy is
-     * dropped only once the tables behind it are empty.
+     * whatever is still fetching or writing for the account is stopped first,
+     * or it would put rows and files back after they were cleared.
      */
     private suspend fun clearAccountData(context: SealedLightContext) {
         withContext(Dispatchers.Main.immediate) { playbackController(context).reset() }
+        libraryRepository(context).stopRefresh()
+        downloadManager(context).cancelInFlight()
         downloadManager(context).clearAll()
-        withContext(Dispatchers.IO) { db(context).clearAllTables() }
         upNextQueue(context).reset()
+        withContext(Dispatchers.IO) { db(context).clearAllTables() }
     }
 }

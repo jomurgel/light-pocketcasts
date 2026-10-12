@@ -14,6 +14,8 @@ import java.io.File
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 
@@ -34,6 +36,9 @@ class DownloadManager(
     private val intake = Channel<String>(Channel.UNLIMITED)
     private val requests = Channel<String>(Channel.UNLIMITED)
 
+    @Volatile
+    private var transfer: Job? = null
+
     init {
         downloadsDir.mkdirs()
         scope.launch {
@@ -45,7 +50,11 @@ class DownloadManager(
                 }
             }
             for (uuid in requests) {
-                process(uuid)
+                // A job of its own, so one transfer can be abandoned without
+                // taking the queue behind it down too.
+                val job = launch { process(uuid) }
+                transfer = job
+                job.join()
             }
         }
     }
@@ -72,6 +81,14 @@ class DownloadManager(
     suspend fun delete(episodeUuid: String) {
         episodeDao.get(episodeUuid)?.filePath?.let { File(it).delete() }
         episodeDao.updateDownloadState(episodeUuid, DownloadState.NONE, 0, null)
+    }
+
+    /** Abandon the transfer in progress and everything waiting behind it. */
+    suspend fun cancelInFlight() {
+        while (intake.tryReceive().isSuccess) Unit
+        while (requests.tryReceive().isSuccess) Unit
+        transfer?.cancelAndJoin()
+        episodeDao.resetInterruptedDownloads()
     }
 
     suspend fun clearAll() {
@@ -132,7 +149,8 @@ class DownloadManager(
             if (!part.renameTo(destination)) throw IOException("rename failed")
             episodeDao.updateDownloadState(uuid, DownloadState.DONE, 100, destination.absolutePath)
         } catch (error: CancellationException) {
-            // Shutting down: the row stays DOWNLOADING and is reset on next start.
+            // Abandoned or shutting down: whoever cancelled resets the row,
+            // and failing that the next start does.
             part.delete()
             throw error
         } catch (error: Exception) {

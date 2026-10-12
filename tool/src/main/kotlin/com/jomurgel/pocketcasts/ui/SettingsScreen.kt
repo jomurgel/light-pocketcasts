@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -67,14 +68,24 @@ class SettingsViewModel(
         }
     }
 
+    private val _signOut = MutableStateFlow(SignOutState.IDLE)
+    val signOut = _signOut.asStateFlow()
+
     fun signOut() {
-        viewModelScope.launch { authRepository.signOut() }
+        if (_signOut.value != SignOutState.IDLE) return
+        _signOut.value = SignOutState.RUNNING
+        viewModelScope.launch {
+            authRepository.signOut()
+            _signOut.value = SignOutState.DONE
+        }
     }
 
     private fun refreshStorage() {
         viewModelScope.launch { _storageBytes.value = downloadManager.storageBytes() }
     }
 }
+
+enum class SignOutState { IDLE, RUNNING, DONE }
 
 class SettingsScreen(sealedActivity: SealedLightActivity) :
     LightScreen<Unit, SettingsViewModel>(sealedActivity) {
@@ -95,6 +106,10 @@ class SettingsScreen(sealedActivity: SealedLightActivity) :
         val authState by viewModel.authState.collectAsState()
         val storageBytes by viewModel.storageBytes.collectAsState()
         val refreshState by viewModel.refreshState.collectAsState()
+        val signOut by viewModel.signOut.collectAsState()
+
+        // Leaving any sooner would take the view model, and the sign-out it is running, with it.
+        LaunchedEffect(signOut) { if (signOut == SignOutState.DONE) goBack(null) }
 
         LightTheme(colors = themeColors) {
             Column(
@@ -139,11 +154,10 @@ class SettingsScreen(sealedActivity: SealedLightActivity) :
                     }
                 }
                 SettingsAction("CLEAR DOWNLOADS") { viewModel.clearDownloads() }
-                if (signedInAs != null) {
-                    SettingsAction("SIGN OUT") {
-                        viewModel.signOut()
-                        goBack(null)
-                    }
+                if (signOut != SignOutState.IDLE) {
+                    SettingsAction("SIGNING OUT…") {}
+                } else if (signedInAs != null) {
+                    SettingsAction("SIGN OUT") { viewModel.signOut() }
                 }
             }
         }

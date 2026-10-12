@@ -12,7 +12,9 @@ import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -162,6 +164,33 @@ class DownloadManagerTest {
         assertEquals(path, unchanged.filePath)
         assertTrue(File(path!!).exists())
         assertEquals(2, engine.requestHistory.size)
+    }
+
+    @Test
+    fun `cancelling in-flight work stops the transfer and forgets what was queued`() = runTest {
+        episodeDao.insertIgnore(listOf(episode("e1"), episode("e2")))
+        val serve = CompletableDeferred<Unit>()
+        val asked = AtomicInteger()
+        val engine = MockEngine {
+            asked.incrementAndGet()
+            serve.await()
+            respond(audioBytes, HttpStatusCode.OK, headersOf("Content-Length", audioBytes.size.toString()))
+        }
+        val manager = manager(engine)
+        manager.enqueue("e1")
+        manager.enqueue("e2")
+        awaitState("e1", DownloadState.DOWNLOADING)
+        awaitState("e2", DownloadState.QUEUED)
+
+        manager.cancelInFlight()
+        serve.complete(Unit)
+        // Long enough for a transfer that was not really stopped to finish.
+        withContext(Dispatchers.Default) { delay(300) }
+
+        assertEquals(1, asked.get())
+        assertEquals(emptyList(), dir.listFiles().orEmpty().map { it.name })
+        assertEquals(DownloadState.FAILED, episodeDao.get("e1")!!.downloadState)
+        assertEquals(DownloadState.FAILED, episodeDao.get("e2")!!.downloadState)
     }
 
     @Test

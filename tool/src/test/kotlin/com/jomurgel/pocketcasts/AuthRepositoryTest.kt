@@ -7,11 +7,16 @@ import com.jomurgel.pocketcasts.data.api.AuthApi
 import com.jomurgel.pocketcasts.data.api.AuthError
 import com.jomurgel.pocketcasts.data.api.AuthSession
 import com.jomurgel.pocketcasts.data.api.LoginTokenResponseDto
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private class LoginScriptApi(
     private val onLogin: suspend (String, String) -> LoginTokenResponseDto,
@@ -99,6 +104,26 @@ class AuthRepositoryTest {
 
         assertEquals(1, clears)
         assertNull(store.cachedAccount())
+    }
+
+    @Test
+    fun `a sign out that has started finishes even if the screen that asked goes away`() = runTest {
+        var cleared = false
+        val store = FakeTokenStore()
+        val repository = repo(store, loginAs("u1", "a@example.com")) {
+            delay(100)
+            cleared = true
+        }
+        repository.signIn("a@example.com", "pw")
+
+        val asking = launch { repository.signOut() }
+        runCurrent()
+        asking.cancel()
+        advanceUntilIdle()
+
+        assertTrue(cleared)
+        assertNull(store.tokens)
+        assertEquals(AuthState.SignedOut, repository.authState.value)
     }
 
     @Test

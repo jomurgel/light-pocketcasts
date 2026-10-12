@@ -185,4 +185,7 @@ interface SyncMetaDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(entity: SyncMetaEntity)
+
+    @Query("DELETE FROM sync_meta WHERE `key` IN (:keys)")
+    suspend fun delete(keys: List<String>)
 }

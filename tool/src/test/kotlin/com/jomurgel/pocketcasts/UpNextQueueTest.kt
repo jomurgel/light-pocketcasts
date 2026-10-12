@@ -13,9 +13,12 @@ import com.jomurgel.pocketcasts.data.sync.RemoteQueueEpisode
 import com.jomurgel.pocketcasts.data.sync.RemoteQueueResult
 import com.jomurgel.pocketcasts.data.sync.SyncBackend
 import com.jomurgel.pocketcasts.data.sync.SyncException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -31,6 +34,10 @@ class FakeSyncMetaDao : SyncMetaDao {
     override suspend fun put(entity: SyncMetaEntity) {
         store.value = store.value + (entity.key to entity.value)
     }
+
+    override suspend fun delete(keys: List<String>) {
+        store.value = store.value - keys.toSet()
+    }
 }
 
 private class FakeQueueBackend : SyncBackend {
@@ -40,12 +47,16 @@ private class FakeQueueBackend : SyncBackend {
     var throwOnSync = false
     var syncCalls = 0
 
+    /** When set, a sync waits here for the "server" to answer. */
+    var answer: CompletableDeferred<Unit>? = null
+
     override suspend fun fetchSubscriptions(): List<RemotePodcast> = emptyList()
     override suspend fun fetchEpisodes(podcastUuid: String): List<RemoteEpisode> = emptyList()
     override suspend fun fetchInProgress(): List<RemoteEpisodeState> = emptyList()
 
     override suspend fun syncUpNext(serverModified: Long, changes: List<RemoteQueueChange>): RemoteQueueResult {
         syncCalls++
+        answer?.await()
         if (throwOnSync) throw SyncException.Network(RuntimeException("offline"))
         lastWatermark = serverModified
         lastChanges = changes
@@ -164,5 +175,21 @@ class UpNextQueueTest {
 
         val reloaded = UpNextQueue(dao, backend, now = { time })
         assertEquals(listOf("a", "b"), reloaded.head()?.let { listOf(it.episodeUuid) + reloaded.queue.value.drop(1).map { q -> q.episodeUuid } })
+    }
+
+    @Test
+    fun `reset empties storage and ignores a sync that was already in flight`() = runTest {
+        queue.playNow(item("a"))
+        backend.answer = CompletableDeferred()
+        backend.response = RemoteQueueResult(5, listOf(remoteEp("z")))
+        val syncing = launch { queue.sync() }
+        runCurrent()
+
+        queue.reset()
+        backend.answer!!.complete(Unit)
+        syncing.join()
+
+        assertEquals(emptyList(), uuids())
+        assertEquals(emptyMap(), dao.store.value)
     }
 }

@@ -3,9 +3,11 @@ package com.jomurgel.pocketcasts.data
 import com.jomurgel.pocketcasts.data.api.AuthError
 import com.jomurgel.pocketcasts.data.api.AuthSession
 import com.jomurgel.pocketcasts.data.api.AuthApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 sealed interface AuthState {
     /** Persisted tokens not yet loaded. */
@@ -65,11 +67,17 @@ class AuthRepository(
         }
     }
 
-    /** Deliberate sign-out: nothing of the account stays on the device. */
+    /**
+     * Deliberate sign-out: nothing of the account stays on the device. Once
+     * begun it runs to the end even if whoever asked is gone, because half a
+     * wipe is worse than none.
+     */
     suspend fun signOut() {
-        tokenStore.clear()
-        _authState.value = AuthState.SignedOut
-        clearAccountData()
+        withContext(NonCancellable) {
+            tokenStore.clear()
+            _authState.value = AuthState.SignedOut
+            clearAccountData()
+        }
     }
 
     /**

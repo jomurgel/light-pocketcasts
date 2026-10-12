@@ -57,6 +57,9 @@ class UpNextQueue(
     private val mutex = Mutex()
     private var loaded = false
 
+    /** Bumped by [reset], so a sync begun before it can tell its answer is stale. */
+    private var generation = 0
+
     private val _queue = MutableStateFlow<List<QueueItem>>(emptyList())
     val queue: StateFlow<List<QueueItem>> = _queue.asStateFlow()
 
@@ -66,9 +69,14 @@ class UpNextQueue(
         loaded = true
     }
 
-    /** Forget the in-memory queue; the next read reloads from storage. */
+    /**
+     * Forget the queue, here and in storage. A sync still in flight was for
+     * the account being cleared; its answer is dropped when it lands.
+     */
     suspend fun reset() {
         mutex.withLock {
+            generation++
+            syncMetaDao.delete(listOf(KEY_QUEUE, KEY_CHANGES, KEY_WATERMARK))
             _queue.value = emptyList()
             loaded = false
         }
@@ -128,8 +136,10 @@ class UpNextQueue(
      * were actually sent get cleared; edits made mid-flight survive.
      */
     suspend fun sync(): Boolean {
+        val started: Int
         val (watermark, pending) = mutex.withLock {
             ensureLoaded()
+            started = generation
             readWatermark() to readChanges()
         }
         val result = try {
@@ -138,6 +148,7 @@ class UpNextQueue(
             return false
         }
         mutex.withLock {
+            if (generation != started) return false
             result.episodes?.let { episodes ->
                 _queue.value = episodes.map {
                     QueueItem(
