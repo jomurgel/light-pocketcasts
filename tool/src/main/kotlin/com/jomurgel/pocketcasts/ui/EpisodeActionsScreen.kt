@@ -23,6 +23,7 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTheme
@@ -140,49 +141,53 @@ class EpisodeActionsScreen(
                     return@Column
                 }
 
-                LightText(
-                    text = current.title,
-                    variant = LightTextVariant.Heading,
-                    maxLines = 4,
-                    modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
-                )
-                LightText(
-                    text = episodeDetailLine(current),
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
-                )
-                LightText(
-                    text = downloadStatusLine(current),
-                    variant = LightTextVariant.Detail,
-                    lighten = true,
-                    modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
-                )
-
-                queued?.let {
+                // A long title wraps to several lines; without scrolling the
+                // last actions would fall off the bottom of the screen.
+                LightScrollView(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LightText(
-                        text = it,
-                        variant = LightTextVariant.Detail,
+                        text = current.title,
+                        variant = LightTextVariant.Heading,
+                        maxLines = 4,
                         modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
                     )
-                }
+                    LightText(
+                        text = episodeDetailLine(current),
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
+                    )
+                    LightText(
+                        text = downloadStatusLine(current),
+                        variant = LightTextVariant.Detail,
+                        lighten = true,
+                        modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
+                    )
 
-                ActionRow("PLAY NOW") {
-                    navigateTo(screenFactory = { PlayerScreen(it, episodeUuid) })
-                }
-                ActionRow("PLAY NEXT") { viewModel.playNext() }
-                ActionRow("PLAY LAST") { viewModel.playLast() }
+                    queued?.let {
+                        LightText(
+                            text = it,
+                            variant = LightTextVariant.Detail,
+                            modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
+                        )
+                    }
 
-                ActionRow(if (current.isArchived) "UNARCHIVE" else "ARCHIVE") { viewModel.toggleArchived() }
-                ActionRow(if (current.starred) "UNSTAR" else "STAR") { viewModel.toggleStarred() }
+                    ActionRow("PLAY NOW") {
+                        navigateTo(screenFactory = { PlayerScreen(it, episodeUuid) })
+                    }
+                    ActionRow("PLAY NEXT") { viewModel.playNext() }
+                    ActionRow("PLAY LAST") { viewModel.playLast() }
 
-                when (current.downloadState) {
-                    DownloadState.QUEUED -> ActionRow("QUEUED…") {}
-                    DownloadState.DOWNLOADING ->
-                        ActionRow("DOWNLOADING ${current.downloadProgress}%") {}
-                    DownloadState.DONE -> ActionRow("DELETE DOWNLOAD") { viewModel.deleteDownload() }
-                    DownloadState.FAILED -> ActionRow("RETRY DOWNLOAD") { viewModel.download() }
-                    else -> ActionRow("DOWNLOAD") { viewModel.download() }
+                    ActionRow(if (current.isArchived) "UNARCHIVE" else "ARCHIVE") { viewModel.toggleArchived() }
+                    ActionRow(if (current.starred) "UNSTAR" else "STAR") { viewModel.toggleStarred() }
+
+                    when (current.downloadState) {
+                        DownloadState.QUEUED -> ActionRow("QUEUED…") {}
+                        DownloadState.DOWNLOADING ->
+                            ActionRow("DOWNLOADING ${current.downloadProgress}%") {}
+                        DownloadState.DONE -> ActionRow("DELETE DOWNLOAD") { viewModel.deleteDownload() }
+                        DownloadState.FAILED -> ActionRow("RETRY DOWNLOAD") { viewModel.download() }
+                        else -> ActionRow("DOWNLOAD") { viewModel.download() }
+                    }
                 }
             }
         }
