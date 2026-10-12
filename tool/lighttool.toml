@@ -7,6 +7,7 @@ permissions = ["android.permission.INTERNET", "android.permission.ACCESS_NETWORK
 capabilities = ["detached-audio"]
 # orientation lock omitted on purpose: stock AOSP letterboxes fixed-orientation
 # apps to 4:3 on the LP3's squarish display (config_fixedOrientationLetterboxAspectRatio),
-# which clips the UI on the tier-2 emulator. The LP3 display is portrait-fixed anyway.
-# change if you run this on an LP3!
-serverPackage = "com.thelightphone.sdk.emulator"
+# which clips the UI on the LightOS emulator. The LP3 display is portrait-fixed anyway.
+# for the LightOS emulator, use the line below and build with -DlightSdk.allowAltServerPackage=true
+# serverPackage = "com.thelightphone.sdk.emulator"
+serverPackage = "com.lightos"

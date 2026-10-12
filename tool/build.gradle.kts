@@ -78,8 +78,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.light.keyboard)
     testImplementation(libs.kotlin.test)
-    testImplementation(libs.ktor.client.mock)
-    testImplementation(libs.kotlinx.coroutines.test)
+    // Literal coordinates: Light's build server compiles this module against its own
+    // copy of the SDK's version catalog, so aliases added to a fork's catalog don't resolve.
+    testImplementation("io.ktor:ktor-client-mock:${libs.versions.ktor.get()}")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     ksp(libs.androidx.room.compiler)
 }
 
