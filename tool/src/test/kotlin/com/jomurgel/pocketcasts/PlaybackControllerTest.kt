@@ -16,10 +16,14 @@ import com.jomurgel.pocketcasts.data.sync.SyncBackend
 import com.jomurgel.pocketcasts.playback.PROGRESS_SAMPLE_INTERVAL_MS
 import com.jomurgel.pocketcasts.playback.PlaybackController
 import com.jomurgel.pocketcasts.playback.PlayerHandle
+import com.jomurgel.pocketcasts.playback.SEEK_READY_TIMEOUT_MS
 import com.thelightphone.sdk.audio.LightAudioError
 import com.thelightphone.sdk.audio.LightAudioItem
 import com.thelightphone.sdk.audio.LightAudioSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -27,7 +31,12 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private class FakePlayerHandle : PlayerHandle {
+/**
+ * Behaves like the SDK player where it matters: loading a queue stops audio and
+ * zeroes position and length, the length arrives a beat later, and a seek is
+ * clamped to whatever length is known at that moment.
+ */
+private class FakePlayerHandle(private val scope: CoroutineScope) : PlayerHandle {
     override val positionMs = MutableStateFlow(0L)
     override val durationMs = MutableStateFlow(0L)
     override val isPlaying = MutableStateFlow(false)
@@ -40,9 +49,17 @@ private class FakePlayerHandle : PlayerHandle {
     var ready = true
     var autoPlayOnPlay = true
 
+    /** Length the loaded item turns out to have, or null if it never reports one. */
+    var itemDurationMs: Long? = 1_800_000L
+
     override suspend fun awaitReady(): Boolean = ready
     override fun setMediaQueue(items: List<LightAudioItem>, startIndex: Int) {
         queue = items
+        isPlaying.value = false
+        positionMs.value = 0
+        durationMs.value = 0
+        currentMediaItemIndex.value = startIndex
+        itemDurationMs?.let { resolved -> scope.launch { durationMs.value = resolved } }
     }
 
     override fun play() {
@@ -58,8 +75,9 @@ private class FakePlayerHandle : PlayerHandle {
     }
 
     override fun seekTo(ms: Long) {
-        seekedToMs = ms
-        positionMs.value = ms
+        val landed = ms.coerceIn(0L, durationMs.value)
+        seekedToMs = landed
+        positionMs.value = landed
     }
 
     override fun skipBack() = Unit
@@ -115,7 +133,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `play resumes from saved position and records progress`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -135,7 +153,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `near-start positions do not seek`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -149,7 +167,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `downloaded episodes play from file`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -165,7 +183,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `sampler records while playing and on pause`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -189,7 +207,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `preparing state shows until audio actually rolls`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         // Audio does not start rolling on play() until we say so.
         handle.autoPlayOnPlay = false
         val controller = PlaybackController(
@@ -211,7 +229,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `refresh queue swaps to downloaded file preserving position`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -237,7 +255,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `attach fails cleanly when the player never readies`() = runTest {
-        val handle = FakePlayerHandle().apply { ready = false }
+        val handle = FakePlayerHandle(this).apply { ready = false }
         val controller = PlaybackController(
             this, progressRepo(), queue,
             episodeLookup = { episodeDao.get(it) },
@@ -247,8 +265,12 @@ class PlaybackControllerTest {
 
     @Test
     fun `switching episodes records each one's own position`() = runTest {
-        val handle = FakePlayerHandle()
-        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        val handle = FakePlayerHandle(this)
+        // Lookups take real time in the tool, long enough for the player's reset to be seen mid-switch.
+        val controller = PlaybackController(
+            this, progressRepo(), queue,
+            episodeLookup = { delay(1); episodeDao.get(it) },
+        )
         val first = episode(uuid = "e1", durationSec = 2520)
         val second = episode(uuid = "e2", title = "Second", durationSec = 3600)
         episodeDao.insertIgnore(listOf(first, second))
@@ -264,6 +286,7 @@ class PlaybackControllerTest {
         runCurrent()
 
         assertEquals(2400, pendingDao.rows["e1"]?.positionSec)
+        assertEquals(2400, episodeDao.get("e1")!!.positionSec)
         assertEquals(null, pendingDao.rows["e2"])
         assertEquals(PlayStatus.UNPLAYED, episodeDao.get("e2")!!.playStatus)
         controller.shutdownForTest()
@@ -271,7 +294,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `auto-advance marks an episode of unknown length as played`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
         // "x" was queued on another device and isn't in the local catalog.
         queue.playLast(queueItem("x"))
@@ -291,7 +314,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `an episode queued from another screen reaches the player`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
         episodeDao.insertIgnore(listOf(episode()))
         assertTrue(controller.attach { handle })
@@ -316,7 +339,7 @@ class PlaybackControllerTest {
 
     @Test
     fun `a queue changed on another device does not replace the playing episode`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
         episodeDao.insertIgnore(listOf(episode()))
         assertTrue(controller.attach { handle })
@@ -340,8 +363,115 @@ class PlaybackControllerTest {
     }
 
     @Test
+    fun `a queue edit while listening keeps the place and keeps playing`() = runTest {
+        val handle = FakePlayerHandle(this)
+        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        episodeDao.insertIgnore(listOf(episode()))
+        assertTrue(controller.attach { handle })
+        controller.play(episode(), "Show One")
+        runCurrent()
+        handle.positionMs.value = 95_000L
+        runCurrent()
+
+        queue.playLast(queueItem("e2"))
+        advanceTimeBy(QUEUE_SETTLE_MS + 1)
+        runCurrent()
+
+        assertEquals(95_000L, handle.positionMs.value)
+        assertEquals(95_000L, controller.positionMs.value)
+        assertTrue(handle.isPlaying.value)
+        // The reload's moment at zero never counts as progress.
+        assertEquals(null, pendingDao.rows["e1"])
+        controller.shutdownForTest()
+    }
+
+    @Test
+    fun `two queue edits in a row do not leave playback paused`() = runTest {
+        val handle = FakePlayerHandle(this)
+        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        episodeDao.insertIgnore(listOf(episode()))
+        assertTrue(controller.attach { handle })
+        controller.play(episode(), "Show One")
+        runCurrent()
+        handle.positionMs.value = 95_000L
+        runCurrent()
+        // Audio takes a while to roll again after each reload.
+        handle.autoPlayOnPlay = false
+
+        queue.playLast(queueItem("e2"))
+        advanceTimeBy(QUEUE_SETTLE_MS + 1)
+        runCurrent()
+        queue.playLast(queueItem("e3"))
+        advanceTimeBy(QUEUE_SETTLE_MS + 1)
+        runCurrent()
+        handle.autoPlayOnPlay = true
+        controller.togglePlayPause()
+        runCurrent()
+
+        assertEquals(listOf("Episode", "Episode e2", "Episode e3"), handle.titles())
+        assertEquals(95_000L, handle.positionMs.value)
+        assertTrue(controller.isPreparing.value || handle.isPlaying.value)
+        controller.shutdownForTest()
+    }
+
+    @Test
+    fun `a stream that never reports its length still starts`() = runTest {
+        val handle = FakePlayerHandle(this).apply { itemDurationMs = null }
+        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        assertTrue(controller.attach { handle })
+
+        val starting = launch { controller.play(episode(positionSec = 642), "Show One") }
+        runCurrent()
+        assertEquals(false, handle.isPlaying.value)
+        advanceTimeBy(SEEK_READY_TIMEOUT_MS + 1)
+        runCurrent()
+
+        assertTrue(handle.isPlaying.value)
+        starting.join()
+        controller.shutdownForTest()
+    }
+
+    @Test
+    fun `pausing past the listed length of a longer file does not finish the episode`() = runTest {
+        val handle = FakePlayerHandle(this).apply { itemDurationMs = 2_000_000L }
+        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        // Listed as 28 minutes; the file with its ads runs over 33.
+        episodeDao.insertIgnore(listOf(episode(durationSec = 1698)))
+        assertTrue(controller.attach { handle })
+        controller.play(episode(durationSec = 1698), "Show One")
+        runCurrent()
+
+        handle.positionMs.value = 1_750_000L
+        handle.pause()
+        runCurrent()
+
+        assertEquals("e1", controller.nowPlaying.value?.episodeUuid)
+        assertEquals(listOf("e1"), queue.queue.value.map { it.episodeUuid })
+        controller.shutdownForTest()
+    }
+
+    @Test
+    fun `the last episode ending marks it played even when listed as longer`() = runTest {
+        val handle = FakePlayerHandle(this).apply { itemDurationMs = 2_000_000L }
+        val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
+        episodeDao.insertIgnore(listOf(episode(durationSec = 2400)))
+        assertTrue(controller.attach { handle })
+        controller.play(episode(durationSec = 2400), "Show One")
+        runCurrent()
+
+        handle.positionMs.value = 2_000_000L
+        handle.pause()
+        runCurrent()
+
+        assertEquals(null, controller.nowPlaying.value)
+        assertEquals(emptyList(), queue.queue.value)
+        assertEquals(PlayStatus.COMPLETE, episodeDao.get("e1")!!.playStatus)
+        controller.shutdownForTest()
+    }
+
+    @Test
     fun `reset stops playback and forgets the session`() = runTest {
-        val handle = FakePlayerHandle()
+        val handle = FakePlayerHandle(this)
         val controller = PlaybackController(this, progressRepo(), queue, episodeLookup = { episodeDao.get(it) })
         episodeDao.insertIgnore(listOf(episode()))
         assertTrue(controller.attach { handle })

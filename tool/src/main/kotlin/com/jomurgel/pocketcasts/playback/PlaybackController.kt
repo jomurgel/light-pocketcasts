@@ -18,10 +18,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** What is (or was last) loaded in the detached session, for UI surfaces. */
 data class NowPlaying(
@@ -43,6 +45,9 @@ const val FINISH_THRESHOLD_MS = 2_000L
 
 /** Let a burst of queue edits (a move is a remove plus an insert) land as one reload. */
 const val QUEUE_SETTLE_MS = 250L
+
+/** How long a freshly loaded item gets to report its length before we stop waiting to seek into it. */
+const val SEEK_READY_TIMEOUT_MS = 15_000L
 
 val SPEED_PRESETS = listOf(0.8f, 1.0f, 1.2f, 1.5f, 1.8f, 2.0f)
 
@@ -74,6 +79,12 @@ class PlaybackController(
 
     /** Serializes everything that loads the player or moves its queue bookkeeping. */
     private val playerMutex = Mutex()
+
+    /**
+     * True from loading a queue until its start position has landed. The player
+     * reports zero in between, which is nobody's progress.
+     */
+    private var settling = false
 
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
@@ -170,10 +181,12 @@ class PlaybackController(
     }
 
     private suspend fun reloadKeepingPosition(player: PlayerHandle, items: List<QueueItem>) {
-        val wasPlaying = player.isPlaying.value
+        // Still buffering from an earlier reload counts as playing, or a second
+        // edit close behind the first would leave the audio stopped.
+        val wasPlaying = player.isPlaying.value || _isPreparing.value
         val position = player.positionMs.value
-        loadIntoPlayer(player, items)
-        player.seekTo(position)
+        if (wasPlaying) _isPreparing.value = true
+        loadIntoPlayer(player, items, position)
         if (wasPlaying) player.play()
     }
 
@@ -218,14 +231,9 @@ class PlaybackController(
         val player = handle ?: return
         val queue = upNextQueue.queue.value
         if (queue.isEmpty()) return
-        loadIntoPlayer(player, queue)
-        // The mirrored position still belongs to whatever played before. Point
-        // it at this episode before anything can record it against the new one.
-        _positionMs.value = resumePositionSec * 1000
-        if (resumePositionSec > RESUME_MIN_POSITION_SEC) {
-            player.seekTo(resumePositionSec * 1000)
-        }
+        val startSec = resumePositionSec.takeIf { it > RESUME_MIN_POSITION_SEC } ?: 0
         _isPreparing.value = true
+        loadIntoPlayer(player, queue, startSec * 1000)
         player.play()
         lastRecordedSec = resumePositionSec
         if (resumePositionSec > 0) {
@@ -234,11 +242,32 @@ class PlaybackController(
         }
     }
 
-    private suspend fun loadIntoPlayer(player: PlayerHandle, items: List<QueueItem>) {
-        player.setMediaQueue(items.map { it.toAudioItem(episodeLookup(it.episodeUuid)) }, 0)
-        loadedQueue = items
-        lastKnownIndex = 0
-        updateNowPlaying(items.first())
+    /**
+     * Replaces the player's queue and leaves its first item at [startPositionMs].
+     * Everything that has to be looked up is fetched before the player is
+     * touched, so the switch itself happens in one step: the position and "now
+     * playing" always describe the same episode.
+     */
+    private suspend fun loadIntoPlayer(player: PlayerHandle, items: List<QueueItem>, startPositionMs: Long) {
+        val audioItems = items.map { it.toAudioItem(episodeLookup(it.episodeUuid)) }
+        val first = nowPlayingFor(items.first())
+        settling = true
+        try {
+            _nowPlaying.value = first
+            loadedQueue = items
+            lastKnownIndex = 0
+            _positionMs.value = startPositionMs
+            player.setMediaQueue(audioItems, 0)
+            if (startPositionMs > 0) {
+                // The player clamps a seek to the item's length, and it only
+                // learns the length once the item is prepared. Seek any sooner
+                // and it lands on zero.
+                withTimeoutOrNull(SEEK_READY_TIMEOUT_MS) { player.durationMs.first { it > 0 } }
+                player.seekTo(startPositionMs)
+            }
+        } finally {
+            settling = false
+        }
     }
 
     private suspend fun QueueItem.toAudioItem(known: EpisodeEntity?): LightAudioItem {
@@ -254,18 +283,16 @@ class PlaybackController(
         )
     }
 
-    private suspend fun updateNowPlaying(item: QueueItem) {
-        _nowPlaying.value = NowPlaying(
-            episodeUuid = item.episodeUuid,
-            podcastUuid = item.podcastUuid,
-            episodeTitle = item.title,
-            podcastTitle = podcastTitleLookup(item.podcastUuid),
-            fromDownload = episodeLookup(item.episodeUuid)?.filePath != null,
-        )
-    }
+    private suspend fun nowPlayingFor(item: QueueItem) = NowPlaying(
+        episodeUuid = item.episodeUuid,
+        podcastUuid = item.podcastUuid,
+        episodeTitle = item.title,
+        podcastTitle = podcastTitleLookup(item.podcastUuid),
+        fromDownload = episodeLookup(item.episodeUuid)?.filePath != null,
+    )
 
     private fun mirror(player: PlayerHandle) {
-        mirrorJobs += scope.launch { player.positionMs.collect { _positionMs.value = it } }
+        mirrorJobs += scope.launch { player.positionMs.collect { if (!settling) _positionMs.value = it } }
         mirrorJobs += scope.launch { player.durationMs.collect { _durationMs.value = it } }
         mirrorJobs += scope.launch {
             player.error.collect { error ->
@@ -310,8 +337,9 @@ class PlaybackController(
             playerMutex.withLock {
                 if (index <= lastKnownIndex || index >= loadedQueue.size) return@launch
                 val finished = loadedQueue.subList(lastKnownIndex, index).toList()
+                val next = nowPlayingFor(loadedQueue[index])
                 lastKnownIndex = index
-                updateNowPlaying(loadedQueue[index])
+                _nowPlaying.value = next
                 finished.forEach { done ->
                     val durationSec = episodeLookup(done.episodeUuid)?.durationSec ?: 0
                     progressRepository.recordCompleted(done.episodeUuid, done.podcastUuid, durationSec)
@@ -346,9 +374,12 @@ class PlaybackController(
     private suspend fun finishIfEnded() {
         playerMutex.withLock {
             val playing = _nowPlaying.value ?: return
-            val duration = currentDurationMs(playing)
+            // The file's real length decides this. The catalog's figure can be
+            // minutes off either way once ads are stitched in.
+            val duration = _durationMs.value.takeIf { it > 0 } ?: currentDurationMs(playing)
             if (duration <= 0 || _positionMs.value < duration - FINISH_THRESHOLD_MS) return
             if (lastKnownIndex != loadedQueue.lastIndex) return
+            progressRepository.recordCompleted(playing.episodeUuid, playing.podcastUuid, currentDurationMs(playing) / 1000)
             upNextQueue.remove(playing.episodeUuid)
             _nowPlaying.value = null
             loadedQueue = emptyList()
@@ -358,6 +389,7 @@ class PlaybackController(
     }
 
     private suspend fun recordCurrent() {
+        if (settling) return
         val playing = _nowPlaying.value ?: return
         val positionSec = _positionMs.value / 1000
         if (positionSec == lastRecordedSec) return
