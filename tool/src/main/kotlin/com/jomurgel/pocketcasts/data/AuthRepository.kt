@@ -23,6 +23,8 @@ class AuthRepository(
     private val tokenStore: TokenStore,
     private val authApi: AuthApi,
     val session: AuthSession,
+    /** Wipes everything cached for the account: library, outboxes, queue, downloads. */
+    private val clearAccountData: suspend () -> Unit = {},
 ) {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Unknown)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
@@ -41,28 +43,42 @@ class AuthRepository(
     suspend fun signIn(email: String, password: String): SignInResult {
         return try {
             val response = authApi.login(email, password)
+            val signedInEmail = response.email.ifBlank { email }
+            // A session can expire with unsynced changes still queued. They may
+            // only ever be pushed to the account that made them.
+            val cached = tokenStore.cachedAccount()
+            if (cached != null && cached != accountIdentity(response.uuid, signedInEmail)) {
+                clearAccountData()
+            }
             tokenStore.write(
                 AuthTokens(
                     accessToken = response.accessToken,
                     refreshToken = response.refreshToken,
-                    email = response.email.ifBlank { email },
+                    email = signedInEmail,
                     accountUuid = response.uuid,
                 ),
             )
-            _authState.value = AuthState.SignedIn(response.email.ifBlank { email })
+            _authState.value = AuthState.SignedIn(signedInEmail)
             SignInResult.Success
         } catch (error: AuthError) {
             SignInResult.Failure(error)
         }
     }
 
+    /** Deliberate sign-out: nothing of the account stays on the device. */
     suspend fun signOut() {
         tokenStore.clear()
         _authState.value = AuthState.SignedOut
+        clearAccountData()
     }
 
-    /** Called by the session when a token refresh fails permanently. */
+    /**
+     * Called by the session when a token refresh fails permanently. The user
+     * didn't ask to leave, so downloads and unsynced changes are kept for when
+     * they sign back in.
+     */
     suspend fun onSessionExpired() {
-        signOut()
+        tokenStore.expire()
+        _authState.value = AuthState.SignedOut
     }
 }

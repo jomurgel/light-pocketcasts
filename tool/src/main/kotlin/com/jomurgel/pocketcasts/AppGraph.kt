@@ -20,6 +20,7 @@ import com.thelightphone.sdk.buildDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -51,6 +52,21 @@ object AppGraph {
     @Volatile
     private var episodeState: EpisodeStateRepository? = null
 
+    // One connection pool and one sync API for the whole tool.
+    private val httpClient by lazy { pocketCastsHttpClient() }
+
+    @Volatile
+    private var syncApiInstance: PocketCastsSyncApi? = null
+
+    private fun syncApi(context: SealedLightContext): PocketCastsSyncApi {
+        return syncApiInstance ?: synchronized(this) {
+            syncApiInstance
+                ?: PocketCastsSyncApi(httpClient, authRepository(context).session).also { syncApiInstance = it }
+        }
+    }
+
+    private fun backend(context: SealedLightContext) = PocketCastsSyncBackend(syncApi(context))
+
     fun authRepository(context: SealedLightContext): AuthRepository {
         return auth ?: synchronized(this) {
             auth ?: buildAuth(context).also { auth = it }
@@ -78,12 +94,10 @@ object AppGraph {
     fun episodeStateRepository(context: SealedLightContext): EpisodeStateRepository {
         return episodeState ?: synchronized(this) {
             episodeState ?: run {
-                val authRepository = authRepository(context)
-                val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
                 EpisodeStateRepository(
                     episodeDao = db(context).episodeDao(),
                     pendingDao = db(context).pendingEpisodeStateDao(),
-                    backend = PocketCastsSyncBackend(syncApi),
+                    backend = backend(context),
                     schedulePush = { LightWork.enqueue(context, PUSH_PROGRESS_JOB_KEY) },
                 ).also { episodeState = it }
             }
@@ -94,7 +108,7 @@ object AppGraph {
         return downloads ?: synchronized(this) {
             downloads ?: DownloadManager(
                 episodeDao = db(context).episodeDao(),
-                client = pocketCastsHttpClient(),
+                client = httpClient,
                 downloadsDir = File(context.filesDir, "episodes"),
                 isOnline = { context.connectivity.currentStatus.isConnected },
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
@@ -103,9 +117,7 @@ object AppGraph {
     }
 
     private fun buildUpNext(context: SealedLightContext): UpNextQueue {
-        val authRepository = authRepository(context)
-        val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
-        return UpNextQueue(db(context).syncMetaDao(), PocketCastsSyncBackend(syncApi))
+        return UpNextQueue(db(context).syncMetaDao(), backend(context))
     }
 
     fun playbackController(context: SealedLightContext): PlaybackController {
@@ -121,13 +133,11 @@ object AppGraph {
     }
 
     private fun buildProgress(context: SealedLightContext): ProgressRepository {
-        val authRepository = authRepository(context)
-        val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
         val db = db(context)
         return ProgressRepository(
             episodeDao = db.episodeDao(),
             pendingProgressDao = db.pendingProgressDao(),
-            syncApi = syncApi,
+            syncApi = syncApi(context),
             schedulePush = { LightWork.enqueue(context, PUSH_PROGRESS_JOB_KEY) },
         )
     }
@@ -161,21 +171,31 @@ object AppGraph {
 
     private fun buildAuth(context: SealedLightContext): AuthRepository {
         val tokenStore = DataStoreTokenStore(context.dataStore)
-        val authApi = PocketCastsAuthApi(pocketCastsHttpClient())
+        val authApi = PocketCastsAuthApi(httpClient)
         val session = AuthSession(tokenStore, authApi)
-        val repository = AuthRepository(tokenStore, authApi, session)
+        val repository = AuthRepository(tokenStore, authApi, session) { clearAccountData(context) }
         session.onSessionExpired = { repository.onSessionExpired() }
         return repository
     }
 
     private fun buildLibrary(context: SealedLightContext): LibraryRepository {
-        val authRepository = authRepository(context)
-        val syncApi = PocketCastsSyncApi(pocketCastsHttpClient(), authRepository.session)
         val db = db(context)
         return LibraryRepository(
-            backend = PocketCastsSyncBackend(syncApi),
+            backend = backend(context),
             podcastDao = db.podcastDao(),
             episodeDao = db.episodeDao(),
         )
+    }
+
+    /**
+     * Removes everything belonging to the signed-in account. Order matters:
+     * playback stops before its files go, and the queue's in-memory copy is
+     * dropped only once the tables behind it are empty.
+     */
+    private suspend fun clearAccountData(context: SealedLightContext) {
+        withContext(Dispatchers.Main.immediate) { playbackController(context).reset() }
+        downloadManager(context).clearAll()
+        withContext(Dispatchers.IO) { db(context).clearAllTables() }
+        upNextQueue(context).reset()
     }
 }

@@ -122,6 +122,18 @@ class PlaybackController(
         if (wasPlaying) player.play()
     }
 
+    /** Stop and forget the session, e.g. when its account's data is wiped. */
+    fun reset() {
+        samplerJob?.cancel()
+        samplerJob = null
+        // Cleared first so the pause that follows records nothing.
+        _nowPlaying.value = null
+        loadedQueue = emptyList()
+        lastKnownIndex = 0
+        _isPreparing.value = false
+        handle?.stop()
+    }
+
     fun togglePlayPause() {
         val player = handle ?: return
         if (player.isPlaying.value) {

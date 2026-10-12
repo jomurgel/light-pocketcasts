@@ -18,6 +18,12 @@ interface TokenStore {
     suspend fun read(): AuthTokens?
     suspend fun write(tokens: AuthTokens)
     suspend fun clear()
+
+    /** Drop the tokens but remember whose data is cached on this device. */
+    suspend fun expire()
+
+    /** Identity of the account whose data is cached, signed in or not. */
+    suspend fun cachedAccount(): String?
 }
 
 private val KEY_ACCESS = stringPreferencesKey("pc_access_token")
@@ -55,4 +61,20 @@ class DataStoreTokenStore(private val dataStore: DataStore<Preferences>) : Token
             prefs.remove(KEY_UUID)
         }
     }
+
+    override suspend fun expire() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_ACCESS)
+            prefs.remove(KEY_REFRESH)
+        }
+    }
+
+    override suspend fun cachedAccount(): String? {
+        val prefs = dataStore.data.first()
+        return accountIdentity(prefs[KEY_UUID].orEmpty(), prefs[KEY_EMAIL].orEmpty())
+    }
 }
+
+/** The account uuid, falling back to the email when the server sent none. */
+fun accountIdentity(accountUuid: String, email: String): String? =
+    accountUuid.ifBlank { email }.ifBlank { null }

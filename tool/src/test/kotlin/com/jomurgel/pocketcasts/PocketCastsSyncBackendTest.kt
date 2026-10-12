@@ -131,4 +131,11 @@ class PocketCastsSyncBackendTest {
         }
         assertEquals(502, error.status)
     }
+
+    @Test
+    fun `a subscription response without a podcast list is an error, not an empty library`() = runTest {
+        val engine = MockEngine { respond("{}", HttpStatusCode.OK, jsonHeaders()) }
+
+        assertFailsWith<SyncException.Server> { backendWith(engine).fetchSubscriptions() }
+    }
 }

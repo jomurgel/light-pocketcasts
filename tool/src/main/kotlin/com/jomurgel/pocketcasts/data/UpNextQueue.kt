@@ -66,6 +66,14 @@ class UpNextQueue(
         loaded = true
     }
 
+    /** Forget the in-memory queue; the next read reloads from storage. */
+    suspend fun reset() {
+        mutex.withLock {
+            _queue.value = emptyList()
+            loaded = false
+        }
+    }
+
     /** Current episode across devices = head of the queue. */
     suspend fun head(): QueueItem? {
         mutex.withLock { ensureLoaded() }

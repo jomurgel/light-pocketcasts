@@ -75,6 +75,9 @@ class HomeViewModel(
         viewModelScope.launch {
             authRepository.restore()
             authRepository.authState.collect { state ->
+                // Sign-out can come from Settings or an expired session, so the
+                // next sign-in has to refresh no matter where this one ended.
+                if (state is AuthState.SignedOut) refreshedThisSession = false
                 if (state is AuthState.SignedIn && !refreshedThisSession) {
                     refreshedThisSession = true
                     // Queue sync first: it's one cheap call and drives the
@@ -93,7 +96,6 @@ class HomeViewModel(
 
     fun signOut() {
         viewModelScope.launch {
-            refreshedThisSession = false
             authRepository.signOut()
         }
     }

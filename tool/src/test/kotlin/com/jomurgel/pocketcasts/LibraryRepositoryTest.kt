@@ -13,6 +13,7 @@ import com.jomurgel.pocketcasts.data.sync.RemoteQueueResult
 import com.jomurgel.pocketcasts.data.sync.SyncBackend
 import com.jomurgel.pocketcasts.data.sync.SyncException
 import java.io.File
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -169,5 +170,39 @@ class LibraryRepositoryTest {
 
         assertEquals("Cached Show", podcastDao.get("p1")?.title)
         assertIs<RefreshState.Failed>(repository.refreshState.value)
+    }
+
+    @Test
+    fun `an empty subscription list removes podcasts and their downloads together`() = runTest {
+        val file = File.createTempFile("episode", ".mp3")
+        podcastDao.upsertAll(listOf(PodcastEntity("p1", "Show", "", 1, null, 1)))
+        episodeDao.insertIgnore(
+            listOf(EpisodeEntity("e1", "p1", "Episode", 1, 1800, "https://cdn.test/e1.mp3", filePath = file.absolutePath)),
+        )
+
+        repo(FakeBackend(subscriptions = emptyList())).refresh()
+
+        assertFalse(file.exists())
+        assertEquals(emptyList(), podcastDao.allUuids())
+    }
+
+    @Test
+    fun `a cancelled refresh does not leave the state stuck on refreshing`() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val backend = object : SyncBackend by FakeBackend() {
+            override suspend fun fetchSubscriptions(): List<RemotePodcast> {
+                gate.await()
+                return emptyList()
+            }
+        }
+        val repository = repo(backend)
+
+        val job = launch { repository.refresh() }
+        testScheduler.runCurrent()
+        assertEquals(RefreshState.Refreshing, repository.refreshState.value)
+        job.cancel()
+        job.join()
+
+        assertEquals(RefreshState.Idle, repository.refreshState.value)
     }
 }

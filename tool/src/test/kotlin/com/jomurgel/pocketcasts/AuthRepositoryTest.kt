@@ -23,8 +23,12 @@ private class LoginScriptApi(
         error("not under test")
 }
 
-private fun repo(store: FakeTokenStore, api: AuthApi): AuthRepository =
-    AuthRepository(store, api, AuthSession(store, api))
+private fun repo(store: FakeTokenStore, api: AuthApi, onClear: suspend () -> Unit = {}): AuthRepository =
+    AuthRepository(store, api, AuthSession(store, api), onClear)
+
+private fun loginAs(uuid: String, email: String) = LoginScriptApi { _, _ ->
+    LoginTokenResponseDto(email = email, uuid = uuid, accessToken = "access-$uuid", refreshToken = "refresh-$uuid")
+}
 
 class AuthRepositoryTest {
 
@@ -82,5 +86,48 @@ class AuthRepositoryTest {
 
         assertNull(store.tokens)
         assertEquals(AuthState.SignedOut, repository.authState.value)
+    }
+
+    @Test
+    fun `sign out wipes cached account data`() = runTest {
+        var clears = 0
+        val store = FakeTokenStore()
+        val repository = repo(store, loginAs("u1", "a@example.com")) { clears++ }
+        repository.signIn("a@example.com", "pw")
+
+        repository.signOut()
+
+        assertEquals(1, clears)
+        assertNull(store.cachedAccount())
+    }
+
+    @Test
+    fun `expired session keeps cached data for the same account`() = runTest {
+        var clears = 0
+        val store = FakeTokenStore()
+        val repository = repo(store, loginAs("u1", "a@example.com")) { clears++ }
+        repository.signIn("a@example.com", "pw")
+
+        repository.onSessionExpired()
+        assertNull(store.tokens)
+        assertEquals(AuthState.SignedOut, repository.authState.value)
+        repository.signIn("a@example.com", "pw")
+
+        assertEquals(0, clears)
+    }
+
+    @Test
+    fun `signing in as another account after expiry wipes the previous data first`() = runTest {
+        var clears = 0
+        val store = FakeTokenStore()
+        repo(store, loginAs("u1", "a@example.com")) { clears++ }.apply {
+            signIn("a@example.com", "pw")
+            onSessionExpired()
+        }
+
+        repo(store, loginAs("u2", "b@example.com")) { clears++ }.signIn("b@example.com", "pw")
+
+        assertEquals(1, clears)
+        assertEquals("u2", store.cachedAccount())
     }
 }

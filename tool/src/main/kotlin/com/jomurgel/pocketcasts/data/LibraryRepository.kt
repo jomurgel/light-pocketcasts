@@ -76,9 +76,9 @@ class LibraryRepository(
             removedUuids.forEach { uuid ->
                 episodeDao.downloadedFilePaths(uuid).forEach { path -> File(path).delete() }
             }
-            if (keepUuids.isNotEmpty()) {
-                podcastDao.deleteNotIn(keepUuids)
-            }
+            // Files and rows go together. An empty list is a real "no
+            // subscriptions": a malformed response fails to parse instead.
+            podcastDao.deleteNotIn(keepUuids)
 
             // Per-podcast catalogs. A single podcast failing shouldn't sink
             // the whole refresh; remember the failure, keep going.
@@ -134,6 +134,12 @@ class LibraryRepository(
             }
         } catch (error: SyncException) {
             _refreshState.value = RefreshState.Failed(error.toUserMessage())
+        } finally {
+            // Cancelled (the screen that asked went away) or failed in a way
+            // we don't report: never leave the guard above latched.
+            if (_refreshState.value == RefreshState.Refreshing) {
+                _refreshState.value = RefreshState.Idle
+            }
         }
     }
 

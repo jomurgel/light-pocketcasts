@@ -13,7 +13,9 @@ internal data class PodcastListRequestDto(
 
 @Serializable
 internal data class PodcastListResponseDto(
-    @SerialName("podcasts") val podcasts: List<PodcastDto> = emptyList(),
+    // Required on purpose: an absent list must fail parsing rather than read as
+    // "no subscriptions", which would remove the whole library.
+    @SerialName("podcasts") val podcasts: List<PodcastDto>,
 )
 
 @Serializable

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -94,8 +95,10 @@ class SignInScreen(sealedActivity: SealedLightActivity) :
         val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.state.collectAsState()
 
-        if (state.done) {
-            goBack(Unit)
+        // An effect, not a call in the composable body: the body can run again
+        // before this screen leaves, and each run would pop another screen.
+        LaunchedEffect(state.done) {
+            if (state.done) goBack(Unit)
         }
 
         LightTheme(colors = themeColors) {

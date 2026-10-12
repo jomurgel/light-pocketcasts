@@ -29,6 +29,9 @@ class DownloadManager(
     private val isOnline: suspend () -> Boolean,
     private val scope: CoroutineScope,
 ) {
+    // Two stages so an episode shows as queued straight away, even while an
+    // earlier download is still in flight.
+    private val intake = Channel<String>(Channel.UNLIMITED)
     private val requests = Channel<String>(Channel.UNLIMITED)
 
     init {
@@ -36,6 +39,11 @@ class DownloadManager(
         scope.launch {
             episodeDao.resetInterruptedDownloads()
             sweepOrphans()
+            launch {
+                for (uuid in intake) {
+                    accept(uuid)
+                }
+            }
             for (uuid in requests) {
                 process(uuid)
             }
@@ -43,19 +51,22 @@ class DownloadManager(
     }
 
     fun enqueue(episodeUuid: String) {
-        scope.launch {
-            // Already on disk or on its way: re-queueing would discard the file
-            // (or the in-flight transfer) and fetch the whole episode again.
-            val state = episodeDao.get(episodeUuid)?.downloadState
-            if (state == DownloadState.QUEUED ||
-                state == DownloadState.DOWNLOADING ||
-                state == DownloadState.DONE
-            ) {
-                return@launch
-            }
-            episodeDao.updateDownloadState(episodeUuid, DownloadState.QUEUED, 0, null)
-            requests.send(episodeUuid)
+        intake.trySend(episodeUuid)
+    }
+
+    /** Marks a requested episode queued, in the order requests were made. */
+    private suspend fun accept(episodeUuid: String) {
+        // Already on disk or on its way: re-queueing would discard the file
+        // (or the in-flight transfer) and fetch the whole episode again.
+        val state = episodeDao.get(episodeUuid)?.downloadState
+        if (state == DownloadState.QUEUED ||
+            state == DownloadState.DOWNLOADING ||
+            state == DownloadState.DONE
+        ) {
+            return
         }
+        episodeDao.updateDownloadState(episodeUuid, DownloadState.QUEUED, 0, null)
+        requests.send(episodeUuid)
     }
 
     suspend fun delete(episodeUuid: String) {
