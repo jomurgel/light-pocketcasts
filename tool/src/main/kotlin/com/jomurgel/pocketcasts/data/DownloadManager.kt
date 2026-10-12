@@ -3,6 +3,8 @@ package com.jomurgel.pocketcasts.data
 import com.jomurgel.pocketcasts.data.db.DownloadState
 import com.jomurgel.pocketcasts.data.db.EpisodeDao
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.contentLength
@@ -10,6 +12,7 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readAvailable
 import java.io.File
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -41,6 +44,15 @@ class DownloadManager(
 
     fun enqueue(episodeUuid: String) {
         scope.launch {
+            // Already on disk or on its way: re-queueing would discard the file
+            // (or the in-flight transfer) and fetch the whole episode again.
+            val state = episodeDao.get(episodeUuid)?.downloadState
+            if (state == DownloadState.QUEUED ||
+                state == DownloadState.DOWNLOADING ||
+                state == DownloadState.DONE
+            ) {
+                return@launch
+            }
             episodeDao.updateDownloadState(episodeUuid, DownloadState.QUEUED, 0, null)
             requests.send(episodeUuid)
         }
@@ -73,7 +85,15 @@ class DownloadManager(
         val part = File(downloadsDir, "$uuid.part")
         val destination = File(downloadsDir, "$uuid.mp3")
         try {
-            client.prepareGet(episode.audioUrl).execute { response ->
+            client.prepareGet(episode.audioUrl) {
+                // The client's request timeout covers the whole call, body included,
+                // and an episode takes minutes on a phone connection. Bound the gap
+                // between reads instead so a stalled transfer still fails.
+                timeout {
+                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = DOWNLOAD_STALL_TIMEOUT_MS
+                }
+            }.execute { response ->
                 if (!response.status.isSuccess()) {
                     throw IOException("HTTP ${response.status.value}")
                 }
@@ -100,6 +120,10 @@ class DownloadManager(
             }
             if (!part.renameTo(destination)) throw IOException("rename failed")
             episodeDao.updateDownloadState(uuid, DownloadState.DONE, 100, destination.absolutePath)
+        } catch (error: CancellationException) {
+            // Shutting down: the row stays DOWNLOADING and is reset on next start.
+            part.delete()
+            throw error
         } catch (error: Exception) {
             part.delete()
             episodeDao.updateDownloadState(uuid, DownloadState.FAILED, 0, null)
@@ -124,5 +148,6 @@ class DownloadManager(
 
     private companion object {
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+        const val DOWNLOAD_STALL_TIMEOUT_MS = 30_000L
     }
 }

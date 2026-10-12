@@ -7,6 +7,8 @@ import com.jomurgel.pocketcasts.data.db.EpisodeEntity
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
+import io.ktor.client.plugins.HttpTimeoutCapability
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import java.io.File
@@ -124,6 +126,42 @@ class DownloadManagerTest {
 
         assertFalse(File(path).exists())
         assertEquals(DownloadState.NONE, episodeDao.get("e1")!!.downloadState)
+    }
+
+    @Test
+    fun `download request is exempt from the overall request timeout`() = runTest {
+        episodeDao.insertIgnore(listOf(episode("e1")))
+        var requestTimeout: Long? = null
+        val engine = MockEngine { request ->
+            requestTimeout = request.getCapabilityOrNull(HttpTimeoutCapability)?.requestTimeoutMillis
+            respond(audioBytes, HttpStatusCode.OK, headersOf("Content-Length", audioBytes.size.toString()))
+        }
+        manager(engine).enqueue("e1")
+
+        awaitState("e1", DownloadState.DONE)
+
+        assertEquals(HttpTimeoutConfig.INFINITE_TIMEOUT_MS, requestTimeout)
+    }
+
+    @Test
+    fun `enqueueing a downloaded episode keeps its file and makes no request`() = runTest {
+        episodeDao.insertIgnore(listOf(episode("e1"), episode("e2")))
+        val engine = engineServing()
+        val manager = manager(engine)
+        manager.enqueue("e1")
+        awaitState("e1", DownloadState.DONE)
+        val path = episodeDao.get("e1")!!.filePath
+
+        manager.enqueue("e1")
+        // Downloads are serial, so e2 finishing proves the repeat request was handled.
+        manager.enqueue("e2")
+        awaitState("e2", DownloadState.DONE)
+
+        val unchanged = episodeDao.get("e1")!!
+        assertEquals(DownloadState.DONE, unchanged.downloadState)
+        assertEquals(path, unchanged.filePath)
+        assertTrue(File(path!!).exists())
+        assertEquals(2, engine.requestHistory.size)
     }
 
     @Test
