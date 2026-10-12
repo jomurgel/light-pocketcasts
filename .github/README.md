@@ -22,7 +22,7 @@ So this is a tool for the Light Phone III that signs into your Pocket Casts acco
 - **Google or Apple sign-in.** There's no browser on the phone, so only email-and-password accounts work.
 - **Search or subscribe.** Add shows from another device and they turn up here on the next refresh.
 - **Auto-download.** Downloads are one episode at a time, by hand.
-- Show notes, chapters, bookmarks, folders, filters, stats.
+- Show notes, chapters, bookmarks, folders, filters, stats, rating.
 
 ## What leaves your phone
 
@@ -71,7 +71,7 @@ Don't commit that swap. Light's build server only accepts `com.lightos`.
 
 ## Status
 
-It works against my own account on the LightOS emulator. It has not yet run on a real Light Phone III — I'll update this the day it does.
+It works against my own account on the LightOS emulator. It has not yet run on a real Light Phone III or Light Flip (waiting on an order) — I'll update this the day it does.
 
 Bugs and pull requests are welcome. If something here misbehaves with your account, an issue with the steps is the most useful thing you can send me. Please don't paste tokens or passwords into it.
 
